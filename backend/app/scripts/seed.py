@@ -78,8 +78,10 @@ async def main():
     should_drop = False
     async with engine.connect() as conn:
         try:
-            table_exists_res = await conn.execute(text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users')"))
-            if table_exists_res.scalar():
+            def table_exists(sync_conn):
+                return sync_conn.dialect.has_table(sync_conn, "users")
+
+            if await conn.run_sync(table_exists):
                 existing_res = await conn.execute(text("SELECT id FROM users WHERE username = 'superadmin'"))
                 if existing_res.first():
                     should_drop = True

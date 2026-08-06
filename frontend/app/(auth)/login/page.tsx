@@ -67,7 +67,7 @@ export default function LoginPage() {
 
   const handleSuperAdminQuickClick = () => {
     setUsername("superadmin");
-    setPassword("admin123");
+    setPassword("Admin@123");
     setShowBarangayList(false);
     setError("");
     setAutofillMessage("Super Admin credentials autofilled!");
@@ -314,7 +314,7 @@ export default function LoginPage() {
                       const val = e.target.value;
                       if (val) {
                         setUsername(val);
-                        setPassword("admin123");
+                        setPassword("Admin@123");
                       }
                     }}
                     defaultValue=""

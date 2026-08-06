@@ -1111,6 +1111,15 @@ export default function OperationTimbangPage() {
           >
             <Plus className="h-4 w-4" /> Add Record
           </button>
+          <button
+            onClick={handleDeleteAll}
+            disabled={deleteAllMutation.isPending}
+            className="admin-action-btn-secondary flex items-center gap-2 px-3 py-2.5 text-xs bg-red-600 text-white hover:bg-red-700 rounded-lg"
+            title="Delete all Operation Timbang records"
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete
+          </button>
           <button 
             onClick={handleDeleteAll}
             disabled={deleteAllMutation.isPending}

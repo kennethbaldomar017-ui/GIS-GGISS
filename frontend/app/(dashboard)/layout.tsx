@@ -211,6 +211,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [isOnline, setIsOnline] = useState(true);
   const [pendingSync, setPendingSync] = useState(0);
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
+  const [mounted, setMounted] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -218,6 +219,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     // Set initial time on mount (client side only)
     setCurrentTime(new Date());
+    setMounted(true);
     
     // Update time every 60 seconds
     const timer = setInterval(() => {
@@ -604,8 +606,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             )}
           </div>
 
-          {/* Date & Time display - Only rendered on client after hydration */}
-          {currentTime ? (
+          {/* Date & Time display - Only render after client mount to avoid hydration mismatch */}
+          {mounted && currentTime ? (
             <div className="hidden md:flex flex-col bg-white/10 border border-white/20 rounded-xl px-3 py-1 text-center leading-tight">
               <p className="text-[10px] font-bold text-white tracking-wide">{formatDate(currentTime)}</p>
               <p className="text-[9px] font-semibold text-brandLightGreen mt-0.5">{formatDayTime(currentTime)}</p>

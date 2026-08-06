@@ -81,8 +81,8 @@
         
         <div class="info">
             <strong>Default Credentials:</strong><br>
-            • Super Admin: superadmin / admin123<br>
-            • Barangay Admin: admin_[barangay] / admin123<br>
+            • Super Admin: superadmin / Admin@123<br>
+            • Barangay Admin: admin_[barangay] / Admin@123<br>
             <br>
             <strong>Backend:</strong> http://localhost:8000<br>
             <strong>Frontend:</strong> http://localhost:3001
@@ -92,10 +92,10 @@
             <label>Quick Select:</label>
             <select id="quickSelect" onchange="fillQuick()">
                 <option value="">-- Select Account --</option>
-                <option value="superadmin|admin123">Super Admin</option>
-                <option value="admin_poblacion_3|admin123">Barangay Admin (Poblacion 3)</option>
-                <option value="admin_concepcion|admin123">Barangay Admin (Concepcion)</option>
-                <option value="admin_mabini|admin123">Barangay Admin (Mabini)</option>
+                <option value="superadmin|Admin@123">Super Admin</option>
+                <option value="admin_poblacion_3|Admin@123">Barangay Admin (Poblacion 3)</option>
+                <option value="admin_concepcion|Admin@123">Barangay Admin (Concepcion)</option>
+                <option value="admin_mabini|Admin@123">Barangay Admin (Mabini)</option>
             </select>
         </div>
 
@@ -182,7 +182,7 @@
         // Auto-fill superadmin on page load
         window.onload = function() {
             document.getElementById('username').value = 'superadmin';
-            document.getElementById('password').value = 'admin123';
+            document.getElementById('password').value = 'Admin@123';
         };
     </script>
 </body>

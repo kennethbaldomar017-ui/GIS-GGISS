@@ -206,6 +206,50 @@ export default function SuperAdminOPTPlusPage() {
     }
   };
 
+  const handleDeleteAllOptPlus = async () => {
+    if (deleteConfirmText !== "DELETE ALL OPT+") {
+      setDeleteError("Please type 'DELETE ALL OPT+' exactly to confirm");
+      return;
+    }
+
+    setDeleteLoading(true);
+    setDeleteError("");
+    setDeleteSuccess("");
+
+    try {
+      const response = await api.delete("/api/operation-timbang/bulk/delete-all");
+      setDeleteSuccess(`✓ Deleted ${response.data.deleted_count || response.data.deleted_count === 0 ? response.data.deleted_count : 'unknown'} OPT+ records`);
+      setDeleteConfirmText("");
+      optDataQuery.refetch();
+      // Optionally refresh after short delay
+      setTimeout(() => { optDataQuery.refetch(); }, 800);
+    } catch (error: any) {
+      setDeleteError(error?.response?.data?.detail || "Failed to delete OPT+ records");
+    } finally {
+      setDeleteLoading(false);
+      setShowDeleteAllModal(false);
+    }
+  };
+
+  const quickDeleteAllOptPlus = async () => {
+    const confirm = prompt("Type DELETE ALL OPT+ to permanently delete all Operation Timbang records (this cannot be undone)");
+    if (confirm !== "DELETE ALL OPT+") {
+      if (confirm !== null) addToast("Delete cancelled - confirmation text did not match", "alert");
+      return;
+    }
+
+    setDeleteLoading(true);
+    try {
+      const response = await api.delete("/api/operation-timbang/bulk/delete-all");
+      addToast(`✓ Deleted ${response.data.deleted_count || 0} OPT+ records`, "success");
+      optDataQuery.refetch();
+    } catch (error: any) {
+      addToast(`❌ Failed to delete OPT+ records: ${error?.response?.data?.detail || error?.message || 'Unknown error'}`, "error");
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   if (optDataQuery.isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -277,6 +321,14 @@ export default function SuperAdminOPTPlusPage() {
           >
             <Trash2 className="h-4 w-4" />
             Delete All Data
+          </button>
+          <button
+            onClick={quickDeleteAllOptPlus}
+            disabled={deleteLoading}
+            className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition font-semibold text-sm"
+          >
+            {deleteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            Delete All OPT+ Records
           </button>
           
           <button
