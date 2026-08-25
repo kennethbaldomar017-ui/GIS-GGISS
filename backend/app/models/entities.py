@@ -258,6 +258,7 @@ class Child(Base, TimestampMixin):
     latitude: Mapped[float] = mapped_column(Float)
     longitude: Mapped[float] = mapped_column(Float)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_indigenous: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     barangay = relationship("Barangay")
     purok = relationship("Purok")
     household = relationship("Household")

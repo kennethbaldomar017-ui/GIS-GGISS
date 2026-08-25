@@ -9,6 +9,7 @@ from typing import Optional, Literal
 from uuid import UUID
 import uuid
 from datetime import date, datetime
+import csv
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -33,6 +34,31 @@ from ..services.three_tier_alerts import (
 )
 
 router = APIRouter(prefix="/api/opt-plus", tags=["OPT Plus"])
+
+
+def parse_indigenous_value(value) -> bool:
+    return str(value).strip().upper() in {"YES", "Y", "TRUE", "1"}
+
+
+def parse_import_date(value, xls_datemode=None):
+    if isinstance(value, (int, float)) and xls_datemode is not None:
+        from xlrd.xldate import xldate_as_datetime
+        return xldate_as_datetime(value, xls_datemode).date()
+    if isinstance(value, str):
+        return datetime.strptime(value.strip().split("T")[0], "%Y-%m-%d").date()
+    if hasattr(value, "date"):
+        return value.date()
+    return value
+
+
+def parse_optional_float(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if value == "":
+            return None
+    return float(value)
 
 # ============================================================================
 # REQUEST/RESPONSE MODELS
@@ -442,6 +468,8 @@ async def get_opt_plus_report(
         year = date.today().year
     if month is None:
         month = date.today().month
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=400, detail="Month must be between 1 and 12")
     
     # Calculate date range
     from calendar import monthrange
@@ -458,19 +486,37 @@ async def get_opt_plus_report(
             .join(Child)
             .where(
                 Child.is_active.is_(True),
-                Measurement.age_in_months.between(0, 59),
                 Measurement.measurement_date.between(start_date, end_date)
             )
         )
+        if user.role.value == "admin":
+            if not user.barangay_id:
+                raise HTTPException(status_code=400, detail="Admin user has no assigned barangay")
+            measurements_query = measurements_query.where(Child.barangay_id == user.barangay_id)
         
         measurements_result = await db.scalars(measurements_query)
         measurements = measurements_result.all()
+
+        latest_by_child = {}
+        for measurement in measurements:
+            child = measurement.child
+            if not child or not child.birth_date:
+                continue
+            age = calculate_age_in_months(child.birth_date, measurement.measurement_date)
+            if not 0 <= age <= 59:
+                continue
+            current = latest_by_child.get(measurement.child_id)
+            if current is None or measurement.measurement_date > current[0].measurement_date:
+                latest_by_child[measurement.child_id] = (measurement, age)
+        measurements = list(latest_by_child.values())
         
         # Get barangay data for header
         barangays_result = await db.scalars(select(Barangay))
         barangays = barangays_result.all()
         
         # Get total population count
+        if user.role.value == "admin":
+            barangays = [b for b in barangays if b.id == user.barangay_id]
         total_population = sum([b.population_count or 0 for b in barangays]) or 10000
         
         # Initialize counters
@@ -499,9 +545,8 @@ async def get_opt_plus_report(
         }
         
         # Process measurements
-        for measurement in measurements:
+        for measurement, age in measurements:
             child = measurement.child
-            age = measurement.age_in_months
             
             children_0_59_months += 1
             
@@ -680,10 +725,23 @@ async def import_measurements(
     Returns summary of imported records and any errors.
     """
     try:
-        # Read Excel file
+        # Read Excel or CSV file
         contents = await file.read()
-        wb = load_workbook(BytesIO(contents))
-        ws = wb.active
+        filename = (file.filename or "").lower()
+        xls_datemode = None
+        if filename.endswith(".csv"):
+            rows = list(csv.reader(contents.decode("utf-8-sig").splitlines()))
+        elif filename.endswith(".xlsx"):
+            wb = load_workbook(BytesIO(contents), data_only=True)
+            rows = list(wb.active.iter_rows(values_only=True))
+        elif filename.endswith(".xls"):
+            import xlrd
+            workbook = xlrd.open_workbook(file_contents=contents)
+            xls_datemode = workbook.datemode
+            sheet = workbook.sheet_by_index(0)
+            rows = [sheet.row_values(row_index) for row_index in range(sheet.nrows)]
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file type. Please upload an .xlsx, .xls, or .csv file.")
         
         imported_count = 0
         error_count = 0
@@ -700,8 +758,8 @@ async def import_measurements(
         data_start_row = 2  # Default for standard format
         
         # Scan first 20 rows to find "Child Seq" header
-        for row_num in range(1, min(25, ws.max_row + 1)):
-            row = list(ws.iter_rows(min_row=row_num, max_row=row_num, values_only=True))[0] if ws.max_row >= row_num else []
+        for row_num in range(1, min(25, len(rows) + 1)):
+            row = rows[row_num - 1]
             if row and len(row) > 0:
                 # Check if first cell contains "Child Seq"
                 first_cell = str(row[0]) if row[0] else ""
@@ -714,7 +772,7 @@ async def import_measurements(
         
         # Process each row
         row_count = 0
-        for idx, row in enumerate(ws.iter_rows(min_row=data_start_row, values_only=True), start=data_start_row):
+        for idx, row in enumerate(rows[data_start_row - 1:], start=data_start_row):
             try:
                 row_count += 1
                 
@@ -760,20 +818,14 @@ async def import_measurements(
                     notes = row[7] if len(row) > 7 and row[7] else None
                     child_id_val = row[8] if len(row) > 8 and row[8] else None
                     age_months_val = row[15] if len(row) > 15 and row[15] else None
+                    is_ip = row[16] if len(row) > 16 and row[16] else None
                     mother_name = row[12] if len(row) > 12 and row[12] else None
                     address_location = row[9] if len(row) > 9 and row[9] else None
                 
                 # Convert date values FIRST - Excel dates come as datetime objects
                 if birth_date_val:
                     try:
-                        if isinstance(birth_date_val, str):
-                            birth_date = datetime.strptime(birth_date_val, "%Y-%m-%d").date()
-                        elif hasattr(birth_date_val, 'date'):
-                            # It's a datetime object
-                            birth_date = birth_date_val.date()
-                        else:
-                            # Assume it's already a date object
-                            birth_date = birth_date_val
+                        birth_date = parse_import_date(birth_date_val, xls_datemode)
                     except Exception as e:
                         errors.append(f"Row {idx}: Invalid birth date format in col {'G' if is_eopt_format else 'B'}: {birth_date_val}")
                         error_count += 1
@@ -783,14 +835,7 @@ async def import_measurements(
                 
                 if measurement_date_val:
                     try:
-                        if isinstance(measurement_date_val, str):
-                            measurement_date = datetime.strptime(measurement_date_val, "%Y-%m-%d").date()
-                        elif hasattr(measurement_date_val, 'date'):
-                            # It's a datetime object
-                            measurement_date = measurement_date_val.date()
-                        else:
-                            # Assume it's already a date object
-                            measurement_date = measurement_date_val
+                        measurement_date = parse_import_date(measurement_date_val, xls_datemode)
                     except Exception as e:
                         errors.append(f"Row {idx}: Invalid measurement date format in col {'H' if is_eopt_format else 'D'}: {measurement_date_val}")
                         error_count += 1
@@ -844,6 +889,20 @@ async def import_measurements(
                     print(f"DEBUG ERROR: {error_msg}")
                     error_count += 1
                     continue
+
+                try:
+                    weight_kg = parse_optional_float(weight_kg)
+                    height_cm = parse_optional_float(height_cm)
+                    muac_cm = parse_optional_float(muac_cm)
+                except (TypeError, ValueError):
+                    errors.append(f"Row {idx}: Invalid numeric value for weight_kg, height_cm, or muac_cm")
+                    error_count += 1
+                    continue
+
+                if weight_kg is None or height_cm is None:
+                    errors.append(f"Row {idx}: Weight and height are required")
+                    error_count += 1
+                    continue
                 
                 # Normalize sex
                 sex_normalized = "M" if str(sex_val).upper() in ["M", "MALE"] else "F"
@@ -883,7 +942,8 @@ async def import_measurements(
                             longitude=float(longitude_val),
                             contact_number=None,
                             household_id=None,
-                            is_active=True
+                            is_active=True,
+                            is_indigenous=parse_indigenous_value(is_ip),
                         )
                         db.add(new_child)
                         await db.flush()
@@ -973,7 +1033,8 @@ async def import_measurements(
                                 longitude=float(longitude_val),
                                 contact_number=None,
                                 household_id=None,
-                                is_active=True
+                                is_active=True,
+                                is_indigenous=parse_indigenous_value(is_ip),
                             )
                             db.add(new_child)
                             await db.flush()
@@ -989,6 +1050,9 @@ async def import_measurements(
                             error_count += 1
                             continue
                 
+                if child is not None:
+                    child.is_indigenous = parse_indigenous_value(is_ip)
+
                 # Calculate age in months
                 age_months = calculate_age_in_months(birth_date, measurement_date)
                 
@@ -1021,7 +1085,7 @@ async def import_measurements(
                     age_in_months=age_months,
                     weight_kg=float(weight_kg),
                     height_cm=adjusted_height,
-                    muac_cm=float(muac_cm) if muac_cm else None,
+                    muac_cm=muac_cm,
                     waz=assessment["waz"],
                     haz=assessment["haz"],
                     whz=assessment["whz"],

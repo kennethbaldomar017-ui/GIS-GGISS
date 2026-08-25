@@ -27,7 +27,7 @@ export default function ImportPage() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-slate-800">Bulk Data Import</h1>
-        <p className="text-sm text-slate-500 mt-1">Import multiple children records from CSV files</p>
+        <p className="text-sm text-slate-500 mt-1">Import multiple children records from CSV or Excel files</p>
       </div>
 
       {/* Info Box */}
@@ -37,7 +37,7 @@ export default function ImportPage() {
           <div>
             <h3 className="font-bold text-blue-900 mb-3">Before importing:</h3>
             <ul className="text-sm text-blue-800 space-y-1.5">
-              <li>• Download the CSV template and fill in your data</li>
+              <li>• Download the Excel template and fill in your data</li>
               <li>• Ensure all required fields are filled correctly</li>
               <li>• Age should be in months, height in cm, weight in kg</li>
               <li>• Status must be one of: Normal, Underweight, Severely Underweight, Stunted, Wasted</li>
@@ -56,7 +56,7 @@ export default function ImportPage() {
             </div>
             <div>
               <h3 className="font-bold text-slate-900">Step 1: Download Template</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Get the CSV template file</p>
+              <p className="text-xs text-slate-500 mt-0.5">Get the Excel template file</p>
             </div>
           </div>
           <a
@@ -65,7 +65,7 @@ export default function ImportPage() {
             className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold text-sm py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
           >
             <Download className="h-4 w-4" />
-            Download CSV Template
+            Download Excel Template
           </a>
         </div>
 
@@ -77,20 +77,20 @@ export default function ImportPage() {
             </div>
             <div>
               <h3 className="font-bold text-slate-900">Step 2: Upload Data</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Import filled CSV file</p>
+              <p className="text-xs text-slate-500 mt-0.5">Import a filled CSV or Excel file</p>
             </div>
           </div>
           <label className="block">
             <div className="border-2 border-dashed border-blue-300 rounded-lg p-8 text-center cursor-pointer hover:bg-blue-50/50 transition-colors">
               <input
                 type="file"
-                accept=".csv"
+                accept=".csv,.xlsx,.xlsm,.xltx,.xltm"
                 onChange={upload}
                 disabled={isUploading}
                 className="hidden"
               />
               <Upload className="h-8 w-8 text-blue-500 mx-auto mb-3" />
-              <p className="font-semibold text-slate-700 text-sm">Click to upload CSV file</p>
+              <p className="font-semibold text-slate-700 text-sm">Click to upload CSV or Excel file</p>
               <p className="text-xs text-slate-500 mt-1">or drag and drop</p>
             </div>
           </label>
@@ -107,7 +107,7 @@ export default function ImportPage() {
             ) : (
               <>
                 <Upload className="h-4 w-4" />
-                <span>Upload CSV File</span>
+                <span>Upload Data File</span>
               </>
             )}
           </button>

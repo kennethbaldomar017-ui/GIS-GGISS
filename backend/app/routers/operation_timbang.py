@@ -19,17 +19,26 @@ from uuid import UUID
 import pandas as pd
 import io
 from ..database import get_db
-from ..middleware.rbac import get_current_user
+from ..middleware.rbac import assert_barangay_scope, get_current_user
 from ..models import User, Child, Measurement, Barangay, Purok
 from ..models.entities import Sex, WazStatus, HazStatus, WhzStatus, OverallStatus
 
 router = APIRouter(prefix="/api/operation-timbang", tags=["operation-timbang"])
 
-def calculate_age_in_months(date_of_birth: date) -> int:
+
+def can_access_operation_timbang(user: User) -> bool:
+    """Allow both admin and super_admin to view/edit Operation Timbang data."""
+    return user.role.value in {"admin", "super_admin"}
+
+
+def calculate_age_in_months(date_of_birth: date, reference_date: date | None = None) -> int:
     """Calculate age in months from date of birth"""
-    today = date.today()
-    months = (today.year - date_of_birth.year) * 12 + (today.month - date_of_birth.month)
+    reference = reference_date or date.today()
+    months = (reference.year - date_of_birth.year) * 12 + (reference.month - date_of_birth.month)
     return max(0, months)
+
+def parse_indigenous_value(value) -> bool:
+    return str(value).strip().upper() in {"YES", "Y", "TRUE", "1"}
 
 
 def calculate_nutritional_status(weight: float, height: float, age_months: int) -> dict:
@@ -108,7 +117,6 @@ def calculate_nutritional_status(weight: float, height: float, age_months: int) 
 
 
 @router.get("")
-@router.get("")
 async def get_records(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
@@ -124,12 +132,12 @@ async def get_records(
     To see all children regardless of age, see /all-records endpoint
     """
     try:
-        # Check if user is admin
-        if user.role.value != "admin":
+        # Allow admin and super_admin to view the full dataset.
+        if not can_access_operation_timbang(user):
             raise HTTPException(status_code=403, detail="Admin access required")
-        
+
         from ..services.analytics import TARGET_AGE_MIN, TARGET_AGE_MAX
-        
+
         # Query recent measurements with eager loading of child relationship
         # Filter to match dashboard analytics (0-59 months only)
         stmt = (
@@ -143,9 +151,10 @@ async def get_records(
             )
             .order_by(Measurement.measurement_date.desc())
         )
-        
-        # Filter by user's barangay if user is admin (not super_admin)
-        if user.role.value == "admin" and user.barangay_id:
+
+        if user.role.value == "admin":
+            if not user.barangay_id:
+                raise HTTPException(status_code=400, detail="Admin user has no assigned barangay")
             stmt = stmt.where(Child.barangay_id == user.barangay_id)
         
         if search:
@@ -171,7 +180,7 @@ async def get_records(
                 Child.is_active.is_(True)
             )
         )
-        if user.role.value == "admin" and user.barangay_id:
+        if user.role.value == "admin":
             count_stmt = count_stmt.where(Child.barangay_id == user.barangay_id)
         total = await db.scalar(count_stmt)
         
@@ -184,6 +193,7 @@ async def get_records(
                 "child_name": child.full_name if child else "Unknown",
                 "mother_name": child.guardian_name if child else "Unknown",
                 "location": child.purok.name if child and child.purok else "Unknown",
+                "indigenous_child": "YES" if child and child.is_indigenous else "NO",
                 "sex": child.sex.value if child else "M",
                 "date_of_birth": child.birth_date.isoformat() if child else "",
                 "actual_date_visit": m.measurement_date.isoformat(),
@@ -204,6 +214,8 @@ async def get_records(
             "limit": limit,
             "note": "Showing children aged 0-59 months (0-5 years) - standard reporting group"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         print(f"Error in get_records: {str(e)}")
@@ -227,10 +239,10 @@ async def get_all_records(
     Use this to see the complete picture before filtering
     """
     try:
-        # Check if user is admin
-        if user.role.value != "admin":
+        # Allow admin and super_admin to view the full dataset.
+        if not can_access_operation_timbang(user):
             raise HTTPException(status_code=403, detail="Admin access required")
-        
+
         # Query all measurements with eager loading of child relationship
         stmt = (
             select(Measurement)
@@ -239,9 +251,10 @@ async def get_all_records(
             .where(Child.is_active.is_(True))
             .order_by(Measurement.measurement_date.desc())
         )
-        
-        # Filter by user's barangay if user is admin
-        if user.role.value == "admin" and user.barangay_id:
+
+        if user.role.value == "admin":
+            if not user.barangay_id:
+                raise HTTPException(status_code=400, detail="Admin user has no assigned barangay")
             stmt = stmt.where(Child.barangay_id == user.barangay_id)
         
         if search:
@@ -262,10 +275,10 @@ async def get_all_records(
             .join(Child)
             .where(Child.is_active.is_(True))
         )
-        if user.role.value == "admin" and user.barangay_id:
+        if user.role.value == "admin":
             count_stmt = count_stmt.where(Child.barangay_id == user.barangay_id)
         total = await db.scalar(count_stmt)
-        
+
         # Also get the target age count for reference
         from ..services.analytics import TARGET_AGE_MIN, TARGET_AGE_MAX
         target_count_stmt = (
@@ -277,8 +290,6 @@ async def get_all_records(
                 Measurement.age_in_months <= TARGET_AGE_MAX
             )
         )
-        if user.role.value == "admin" and user.barangay_id:
-            target_count_stmt = target_count_stmt.where(Child.barangay_id == user.barangay_id)
         target_total = await db.scalar(target_count_stmt)
         
         result = []
@@ -291,6 +302,7 @@ async def get_all_records(
                 "child_name": child.full_name if child else "Unknown",
                 "mother_name": child.guardian_name if child else "Unknown",
                 "location": child.purok.name if child and child.purok else "Unknown",
+                "indigenous_child": "YES" if child and child.is_indigenous else "NO",
                 "sex": child.sex.value if child else "M",
                 "date_of_birth": child.birth_date.isoformat() if child else "",
                 "actual_date_visit": m.measurement_date.isoformat(),
@@ -331,13 +343,15 @@ async def create_record(
     ⚠️ NOTE: Operation Timbang features are disabled for admin and superadmin roles.
     """
     try:
-        if user.role.value != "admin":
+        if not can_access_operation_timbang(user):
             raise HTTPException(status_code=403, detail="Admin access required")
-        
-        # Admin users must be assigned to a barangay
-        if not user.barangay_id:
+
+        target_barangay_id = payload.get("barangay_id") or user.barangay_id
+        if not target_barangay_id:
             raise HTTPException(status_code=400, detail="User is not assigned to any barangay")
-        
+        if user.role.value == "admin" and str(target_barangay_id) != str(user.barangay_id):
+            raise HTTPException(status_code=403, detail="Outside barangay scope")
+
         # Validate required fields
         required_fields = ["child_name", "date_of_birth", "actual_date_visit", "weight", "height"]
         missing_fields = [f for f in required_fields if not payload.get(f)]
@@ -367,7 +381,7 @@ async def create_record(
             raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
         
         # Calculate age and status
-        age_months = calculate_age_in_months(dob)
+        age_months = calculate_age_in_months(dob, visit_date)
         nutritional = calculate_nutritional_status(
             float(payload.get("weight", 0)),
             float(payload.get("height", 0)),
@@ -388,42 +402,42 @@ async def create_record(
             select(Child).where(
                 Child.full_name == child_name,
                 Child.birth_date == dob,
-                Child.barangay_id == user.barangay_id  # Ensure child is from same barangay
+                Child.barangay_id == target_barangay_id
             )
         )
         
         if existing_child:
             child = existing_child
         else:
-            # Get user's barangay and get or create a purok
-            user_barangay = await db.get(Barangay, user.barangay_id)
-            if not user_barangay:
-                raise HTTPException(status_code=400, detail="User's barangay not found")
-            
+            # Get target barangay and get or create a purok
+            target_barangay = await db.get(Barangay, target_barangay_id)
+            if not target_barangay:
+                raise HTTPException(status_code=400, detail="Target barangay not found")
+
             # Get location/purok from form or use first purok in barangay
             location_str = payload.get("location", "").strip()
-            
+
             # Try to find matching purok
             purok = None
             if location_str:
                 purok = await db.scalar(
                     select(Purok).where(
-                        Purok.barangay_id == user.barangay_id,
+                        Purok.barangay_id == target_barangay_id,
                         Purok.name.ilike(f"%{location_str}%")
                     )
                 )
-            
+
             # If no matching purok, get first purok in barangay
             if not purok:
                 purok = await db.scalar(
                     select(Purok).where(
-                        Purok.barangay_id == user.barangay_id
+                        Purok.barangay_id == target_barangay_id
                     ).order_by(Purok.name)
                 )
-            
+
             if not purok:
-                raise HTTPException(status_code=400, detail=f"No purok found in {user_barangay.name}")
-            
+                raise HTTPException(status_code=400, detail=f"No purok found in {target_barangay.name}")
+
             child = Child(
                 full_name=child_name,
                 birth_date=dob,
@@ -431,9 +445,10 @@ async def create_record(
                 guardian_name=payload.get("mother_name", "").strip(),
                 contact_number="",
                 purok_id=purok.id,
-                barangay_id=user.barangay_id,  # Assign to user's barangay
+                barangay_id=target_barangay_id,
                 latitude=0.0,
                 longitude=0.0,
+                is_indigenous=parse_indigenous_value(payload.get("indigenous_child", "NO")),
                 is_active=True
             )
             db.add(child)
@@ -491,21 +506,18 @@ async def get_record(
     ⚠️ NOTE: Operation Timbang features are disabled for admin and superadmin roles.
     """
     try:
-        if user.role.value != "admin":
+        if not can_access_operation_timbang(user):
             raise HTTPException(status_code=403, detail="Admin access required")
-        
+
         measurement = await db.get(Measurement, record_id)
         if not measurement:
             raise HTTPException(status_code=404, detail="Record not found")
-        
+
         child = await db.get(Child, measurement.child_id)
         if not child:
             raise HTTPException(status_code=404, detail="Child record not found")
-        
-        # Check barangay access for admin users
-        if user.role.value == "admin" and child.barangay_id != user.barangay_id:
-            raise HTTPException(status_code=403, detail="Access denied - record not in your barangay")
-        
+        assert_barangay_scope(user, child.barangay_id)
+
         return {
             "id": str(measurement.id),
             "child_id": str(measurement.child_id),
@@ -530,26 +542,25 @@ async def update_record(
     ⚠️ NOTE: Operation Timbang features are disabled for admin and superadmin roles.
     """
     try:
-        if user.role.value != "admin":
+        if not can_access_operation_timbang(user):
             raise HTTPException(status_code=403, detail="Admin access required")
-        
+
         measurement = await db.get(Measurement, record_id)
         if not measurement:
             raise HTTPException(status_code=404, detail="Record not found")
-        
+
         child = await db.get(Child, measurement.child_id)
         if not child:
             raise HTTPException(status_code=404, detail="Child not found")
-        
-        # Check barangay access for admin users
-        if user.role.value == "admin" and child.barangay_id != user.barangay_id:
-            raise HTTPException(status_code=403, detail="Access denied - record not in your barangay")
-        
+        assert_barangay_scope(user, child.barangay_id)
+
         # Update child
         if "child_name" in payload:
             child.full_name = payload["child_name"]
         if "mother_name" in payload:
             child.guardian_name = payload["mother_name"]
+        if "indigenous_child" in payload:
+            child.is_indigenous = parse_indigenous_value(payload["indigenous_child"])
         
         # Parse dates
         dob_str = payload.get("date_of_birth", str(child.birth_date))
@@ -559,7 +570,7 @@ async def update_record(
         visit_date = datetime.fromisoformat(visit_str.replace("Z", "+00:00")).date() if isinstance(visit_str, str) else visit_str
         
         # Recalculate
-        age_months = calculate_age_in_months(dob)
+        age_months = calculate_age_in_months(dob, visit_date)
         nutritional = calculate_nutritional_status(
             payload.get("weight", measurement.weight_kg),
             payload.get("height", measurement.height_cm),
@@ -602,22 +613,18 @@ async def delete_record(
     ⚠️ NOTE: Operation Timbang features are disabled for admin and superadmin roles.
     """
     try:
-        if user.role.value != "admin":
+        if not can_access_operation_timbang(user):
             raise HTTPException(status_code=403, detail="Admin access required")
-        
+
         measurement = await db.get(Measurement, record_id)
         if not measurement:
             raise HTTPException(status_code=404, detail="Record not found")
-        
-        # Get child to verify barangay access
+
         child = await db.get(Child, measurement.child_id)
         if not child:
             raise HTTPException(status_code=404, detail="Child record not found")
-        
-        # Check barangay access for admin users
-        if user.role.value == "admin" and child.barangay_id != user.barangay_id:
-            raise HTTPException(status_code=403, detail="Access denied - record not in your barangay")
-        
+        assert_barangay_scope(user, child.barangay_id)
+
         await db.delete(measurement)
         await db.commit()
         
@@ -716,28 +723,29 @@ async def get_stats(
     ⚠️ NOTE: Operation Timbang features are disabled for admin and superadmin roles.
     """
     try:
-        if user.role.value != "admin":
+        if not can_access_operation_timbang(user):
             raise HTTPException(status_code=403, detail="Admin access required")
-        
-        # Build queries with barangay filter for admin users
+
+        barangay_filter = []
+        if user.role.value == "admin":
+            if not user.barangay_id:
+                raise HTTPException(status_code=400, detail="Admin user has no assigned barangay")
+            barangay_filter.append(Child.barangay_id == user.barangay_id)
+
         stmt_normal = select(func.count(Measurement.id)).join(Child).where(
-            Measurement.overall_status == OverallStatus.normal
+            Measurement.overall_status == OverallStatus.normal,
+            *barangay_filter
         )
         stmt_underweight = select(func.count(Measurement.id)).join(Child).where(
-            Measurement.overall_status == OverallStatus.moderate_acute_malnutrition
+            Measurement.overall_status == OverallStatus.moderate_acute_malnutrition,
+            *barangay_filter
         )
         stmt_wasted = select(func.count(Measurement.id)).join(Child).where(
-            Measurement.overall_status == OverallStatus.severe_acute_malnutrition
+            Measurement.overall_status == OverallStatus.severe_acute_malnutrition,
+            *barangay_filter
         )
-        stmt_total = select(func.count(Measurement.id)).join(Child)
-        
-        # Add barangay filter for admin users
-        if user.role.value == "admin" and user.barangay_id:
-            stmt_normal = stmt_normal.where(Child.barangay_id == user.barangay_id)
-            stmt_underweight = stmt_underweight.where(Child.barangay_id == user.barangay_id)
-            stmt_wasted = stmt_wasted.where(Child.barangay_id == user.barangay_id)
-            stmt_total = stmt_total.where(Child.barangay_id == user.barangay_id)
-        
+        stmt_total = select(func.count(Measurement.id)).join(Child).where(*barangay_filter)
+
         total = await db.scalar(stmt_total) or 0
         normal = await db.scalar(stmt_normal) or 0
         underweight = await db.scalar(stmt_underweight) or 0
@@ -749,6 +757,8 @@ async def get_stats(
             "underweight": underweight,
             "wasted": wasted,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         print(f"Error in get_stats: {str(e)}")

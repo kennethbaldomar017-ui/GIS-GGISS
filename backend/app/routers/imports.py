@@ -1,6 +1,7 @@
 from pathlib import Path
 from uuid import UUID
 from datetime import datetime
+import csv
 from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
@@ -38,10 +39,17 @@ async def process_excel_file(job_id: UUID, file_path: str, user_id: UUID, db: As
         job.status = JobStatus.processing
         await db.commit()
         
-        # Load Excel file
-        wb = load_workbook(file_path)
-        ws = wb.active
-        rows = list(ws.iter_rows(min_row=2, values_only=True))
+        # Normalize CSV and Excel files into data rows with the header removed.
+        if file_path.lower().endswith(".csv"):
+            with open(file_path, "r", encoding="utf-8-sig", newline="") as csv_file:
+                csv_rows = list(csv.reader(csv_file))
+            rows = csv_rows[1:]
+        elif file_path.lower().endswith((".xlsx", ".xlsm", ".xltx", ".xltm")):
+            wb = load_workbook(file_path, data_only=True)
+            ws = wb.active
+            rows = list(ws.iter_rows(min_row=2, values_only=True))
+        else:
+            raise ValueError("Unsupported file type. Please upload a CSV or Excel file.")
         job.total_rows = len(rows)
         await db.commit()
         

@@ -8,7 +8,7 @@ export default function DashboardRoot() {
 
   useEffect(() => {
     // Redirect to the main dashboard view
-    router.replace("/dashboard/dashboard");
+    router.replace("/dashboard");
   }, [router]);
 
   return (

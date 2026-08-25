@@ -70,7 +70,6 @@ function ImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
       }, 500);
       
       onSuccess();
-      onClose();
     } catch (error: any) {
       alert(`Import failed: ${error?.response?.data?.detail || error?.message}`);
     } finally {
@@ -148,7 +147,7 @@ function ImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
                     id="file-input"
                     type="file"
                     hidden
-                    accept=".xlsx,.csv,.xls"
+                    accept=".xlsx,.xls,.csv"
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
                   />
                 </div>
@@ -1232,7 +1231,16 @@ export default function OperationTimbangPage() {
             </thead>
             
             <tbody>
-              {Array.isArray(filteredRecords) && filteredRecords.length > 0 ? (
+              {recordsQ.isLoading ? (
+                <tr><td colSpan={15} className="py-8 text-center text-slate-500">Loading Operation Timbang records...</td></tr>
+              ) : recordsQ.isError ? (
+                <tr>
+                  <td colSpan={15} className="py-8 text-center text-red-600">
+                    <p>Unable to load Operation Timbang records.</p>
+                    <button type="button" onClick={() => recordsQ.refetch()} className="mt-2 underline">Retry</button>
+                  </td>
+                </tr>
+              ) : Array.isArray(filteredRecords) && filteredRecords.length > 0 ? (
                 filteredRecords.map((record: any, idx: number) => {
                   const ageMonths = calculateAge(record.date_of_birth);
                   const getWFAColor = (status: string) => {
