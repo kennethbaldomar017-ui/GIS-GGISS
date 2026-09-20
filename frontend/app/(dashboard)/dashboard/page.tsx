@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import "@/styles/admin.css";
-import { DynamicMap } from "@/components/map/MapContainer";
+import { HeroImageSlider } from "@/components/dashboard/HeroImageSlider";
 import { useAuthStore } from "@/store/auth";
 import { useDashboardRealtimeUpdates } from "@/hooks/useDashboardRealtimeUpdates";
 import { UpcomingProgramsWidget } from "@/components/dashboard/UpcomingProgramsWidget";
@@ -77,11 +77,6 @@ export default function DashboardPage() {
     });
   }, [user, isSuperAdmin]);
   
-  const [mapBoundary, setMapBoundary] = useState(true);
-  const [mapHeatmap, setMapHeatmap] = useState(true);
-  const [mapFacilities, setMapFacilities] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-
   // Enable real-time updates for dashboard data
   const wsStatus = useDashboardRealtimeUpdates();
 
@@ -330,6 +325,9 @@ export default function DashboardPage() {
 
   return (
     <div className="admin-container space-y-6">
+      {/* Hero Image Slider */}
+      <HeroImageSlider />
+
       {/* Top Header Card — role-aware */}
       {isSuperAdmin ? (
         /* ─── SUPERADMIN: Citywide Command Center Banner ─── */
@@ -509,7 +507,7 @@ export default function DashboardPage() {
             <div className="h-8 w-8 bg-yellow-50 text-yellow-600 rounded-lg flex items-center justify-center">
               <Activity className="h-4.5 w-4.5" />
             </div>
-            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Underweight (WFA)</p>
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Underweight (Weight-for-Age)</p>
           </div>
           <div className="mt-3.5">
             <p className="text-2xl font-black text-yellow-750">{liveStats.underweight.toLocaleString()}</p>
@@ -525,7 +523,7 @@ export default function DashboardPage() {
             <div className="h-8 w-8 bg-orange-50 text-orange-600 rounded-lg flex items-center justify-center">
               <TrendingUp className="h-4.5 w-4.5" />
             </div>
-            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Stunted (HFA)</p>
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Stunted (Height-for-Age)</p>
           </div>
           <div className="mt-3.5">
             <p className="text-2xl font-black text-orange-700">{liveStats.stunted.toLocaleString()}</p>
@@ -541,7 +539,7 @@ export default function DashboardPage() {
             <div className="h-8 w-8 bg-red-50 text-red-500 rounded-lg flex items-center justify-center">
               <AlertTriangle className="h-4.5 w-4.5" />
             </div>
-            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Wasted (WFH)</p>
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Wasted (Weight-for-Height)</p>
           </div>
           <div className="mt-3.5">
             <p className="text-2xl font-black text-red-650">{liveStats.wasted.toLocaleString()}</p>
@@ -607,98 +605,6 @@ export default function DashboardPage() {
       {/* ADMIN ONLY: Upcoming Program Activities & Child Monitoring Summary */}
       {!isSuperAdmin && (
         <div className="space-y-6">
-          {/* GIS Heat Map Card - ADMIN VIEW */}
-          <div className="admin-glass-panel p-5 flex flex-col min-h-[380px]">
-            <div className="flex flex-wrap items-center justify-between border-b border-slate-150 pb-3 mb-4">
-              <h2 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                <MapPin className="h-5 w-5 text-teal-600" />
-                GIS Heat Map - Cabadbaran City
-              </h2>
-              <div className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">
-                Updated Live
-              </div>
-            </div>
-
-            <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[210px_1fr] gap-4">
-              {/* Map Controls Panel */}
-              <div className="space-y-4">
-                {/* Risk Level Legend */}
-                <div className="bg-slate-50/50 border border-slate-150 rounded-xl p-3.5">
-                  <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2.5">Risk Level</p>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-xs text-slate-650 font-semibold">
-                      <span className="h-3 w-3 rounded-full bg-green-500" />
-                      <span>Low Risk</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-650 font-semibold">
-                      <span className="h-3 w-3 rounded-full bg-yellow-500" />
-                      <span>Moderate Risk</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-650 font-semibold">
-                      <span className="h-3 w-3 rounded-full bg-orange-500" />
-                      <span>High Risk</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-650 font-semibold">
-                      <span className="h-3 w-3 rounded-full bg-red-600" />
-                      <span>Critical Risk</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Controls Toggle */}
-                <div className="bg-slate-50/50 border border-slate-150 rounded-xl p-3.5">
-                  <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2.5">Map Controls</p>
-                  <div className="space-y-2.5">
-                    <label className="flex items-center justify-between text-xs font-semibold text-slate-600 cursor-pointer">
-                      <span>Barangay Boundary</span>
-                      <input
-                        type="checkbox"
-                        defaultChecked
-                        className="rounded text-teal-600 focus:ring-teal-500 h-4 w-4"
-                      />
-                    </label>
-                    <label className="flex items-center justify-between text-xs font-semibold text-slate-600 cursor-pointer">
-                      <span>Heatmap Layer</span>
-                      <input
-                        type="checkbox"
-                        defaultChecked
-                        className="rounded text-teal-600 focus:ring-teal-500 h-4 w-4"
-                      />
-                    </label>
-                    <label className="flex items-center justify-between text-xs font-semibold text-slate-600 cursor-pointer">
-                      <span>Health Facilities</span>
-                      <input
-                        type="checkbox"
-                        defaultChecked
-                        className="rounded text-teal-600 focus:ring-teal-500 h-4 w-4"
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                {/* Search Box */}
-                <div>
-                  <input
-                    type="text"
-                    placeholder="Search Barangay..."
-                    className="admin-interactive-input w-full rounded-xl px-3 py-2 text-xs focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Map Frame */}
-              <div className="relative rounded-xl border border-slate-200 overflow-hidden shadow-inner flex-1" style={{ minHeight: '300px' }}>
-                <DynamicMap 
-                  showHotspots={true}
-                  showProgramCoverage={true}
-                  showHomeVisits={false}
-                  showFacilities={true}
-                  showPredictions={false}
-                />
-              </div>
-            </div>
-          </div>
-
           {/* Upcoming Program Activities */}
           <UpcomingProgramsWidget 
             data={upcomingProgramsQuery.data} 
@@ -781,93 +687,6 @@ export default function DashboardPage() {
             <span className="bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] font-black px-2.5 py-1 rounded-full uppercase">SuperAdmin Only</span>
           </div>
           <p className="text-sm text-slate-600 font-medium ml-8">City-wide barangay performance monitoring, predictive analytics, and resource optimization</p>
-
-          {/* ─── GIS HEAT MAP FOR SUPERADMIN ─── */}
-          <div className="admin-glass-panel p-5 flex flex-col min-h-[600px]">
-            <div className="flex flex-wrap items-center justify-between border-b border-slate-150 pb-3 mb-4">
-              <h2 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                <MapPin className="h-5 w-5 text-emerald-600" />
-                GIS Heat Map - City-Wide Real-Time Monitoring
-              </h2>
-              <div className="text-[11px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-2">
-                <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
-                Live Updates
-              </div>
-            </div>
-
-            <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[210px_1fr] gap-4">
-              {/* Map Controls Panel */}
-              <div className="space-y-4">
-                {/* Risk Level Legend */}
-                <div className="bg-slate-50/50 border border-slate-150 rounded-xl p-3.5">
-                  <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2.5">Risk Level</p>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-xs text-slate-650 font-semibold">
-                      <span className="h-3 w-3 rounded-full bg-green-500" />
-                      <span>Low Risk</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-650 font-semibold">
-                      <span className="h-3 w-3 rounded-full bg-yellow-500" />
-                      <span>Moderate Risk</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-650 font-semibold">
-                      <span className="h-3 w-3 rounded-full bg-orange-500" />
-                      <span>High Risk</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-650 font-semibold">
-                      <span className="h-3 w-3 rounded-full bg-red-600" />
-                      <span>Critical Risk</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Controls Toggle */}
-                <div className="bg-slate-50/50 border border-slate-150 rounded-xl p-3.5">
-                  <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2.5">Map Controls</p>
-                  <div className="space-y-2.5">
-                    <label className="flex items-center justify-between text-xs font-semibold text-slate-600 cursor-pointer">
-                      <span>Show Boundaries</span>
-                      <input
-                        type="checkbox"
-                        checked={mapBoundary}
-                        onChange={(e) => setMapBoundary(e.target.checked)}
-                        className="w-4 h-4"
-                      />
-                    </label>
-                    <label className="flex items-center justify-between text-xs font-semibold text-slate-600 cursor-pointer">
-                      <span>Heatmap Layer</span>
-                      <input
-                        type="checkbox"
-                        checked={mapHeatmap}
-                        onChange={(e) => setMapHeatmap(e.target.checked)}
-                        className="w-4 h-4"
-                      />
-                    </label>
-                    <label className="flex items-center justify-between text-xs font-semibold text-slate-600 cursor-pointer">
-                      <span>Health Facilities</span>
-                      <input
-                        type="checkbox"
-                        checked={mapFacilities}
-                        onChange={(e) => setMapFacilities(e.target.checked)}
-                        className="w-4 h-4"
-                      />
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {/* Map Frame */}
-              <div className="relative rounded-xl border border-slate-200 overflow-hidden shadow-inner flex-1" style={{ minHeight: '500px' }}>
-                <DynamicMap 
-                  showHotspots={mapHeatmap}
-                  showProgramCoverage={mapFacilities}
-                  showFacilities={mapFacilities}
-                  showHomeVisits={false}
-                  showPredictions={false}
-                />
-              </div>
-            </div>
-          </div>
 
           {/* ─── ROW 1: Compliance Dashboard ─── */}
           <div className="grid gap-6">

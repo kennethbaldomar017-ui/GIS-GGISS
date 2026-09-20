@@ -41,9 +41,7 @@ import {
   EyeOff,
   ChevronLeft,
   ChevronRight,
-  Weight,
-  Play,
-  Pause
+  Weight
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
 import { ToastProvider } from "@/lib/toast-context";
@@ -66,140 +64,6 @@ interface ToastMessage {
   type: "alert" | "log" | "success" | "error";
 }
 
-// Nutrition Banner Component
-function NutritionBanner() {
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [isAutoPlay, setIsAutoPlay] = useState(true);
-  
-  const bannerData = [
-    {
-      image: "/image1.jpg",
-      motto: "Good Nutrition, Healthy Future",
-      icon: "🥗",
-      color: "from-green-600 to-emerald-600"
-    },
-    {
-      image: "/image2.jpg",
-      motto: "Every Child Deserves Better Health",
-      icon: "❤️",
-      color: "from-red-600 to-pink-600"
-    }
-  ];
-
-  useEffect(() => {
-    if (!isAutoPlay) return;
-    
-    const interval = setInterval(() => {
-      setCurrentImageIndex((prev) => (prev + 1) % bannerData.length);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [isAutoPlay, bannerData.length]);
-
-  const currentBanner = bannerData[currentImageIndex];
-
-  return (
-    <div className="shrink-0 space-y-2.5 px-3 pb-3 overflow-hidden">
-      
-      {/* Main Banner Card */}
-      <div className="relative w-full overflow-hidden rounded-lg shadow-lg border-2 border-brandLightGreen/40 hover:border-brandLightGreen/70 transition-colors group">
-        
-        {/* Banner Image Container - Enhanced */}
-        <div className="relative w-full h-40 overflow-hidden bg-gradient-to-br from-slate-700 to-slate-900">
-          {/* Current Image - No scroll, centered */}
-          <img
-            key={`banner-${currentImageIndex}`}
-            src={currentBanner.image}
-            alt="Nutrition banner"
-            className="w-full h-full object-cover object-center transition-all duration-1000 ease-in-out hover:scale-105 pointer-events-none"
-          />
-          
-          {/* Subtle overlay only */}
-          <div className={`absolute inset-0 bg-gradient-to-t ${currentBanner.color} opacity-15 mix-blend-overlay`} />
-          
-          {/* Vignette effect for better image visibility */}
-          <div className="absolute inset-0 bg-radial-gradient to-transparent opacity-40" style={{
-            background: "radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.3) 100%)"
-          }} />
-        </div>
-
-        {/* Navigation Arrows - Enhanced */}
-        <button
-          onClick={() => {
-            setCurrentImageIndex((prev) => (prev - 1 + bannerData.length) % bannerData.length);
-            setIsAutoPlay(false);
-          }}
-          className="absolute left-2 top-1/2 -translate-y-1/2 z-20 bg-white/30 hover:bg-white/50 text-white p-2 rounded-full backdrop-blur-md transition-all opacity-0 group-hover:opacity-100 shadow-lg"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
-        
-        <button
-          onClick={() => {
-            setCurrentImageIndex((prev) => (prev + 1) % bannerData.length);
-            setIsAutoPlay(false);
-          }}
-          className="absolute right-2 top-1/2 -translate-y-1/2 z-20 bg-white/30 hover:bg-white/50 text-white p-2 rounded-full backdrop-blur-md transition-all opacity-0 group-hover:opacity-100 shadow-lg"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
-
-        {/* Auto-play toggle - Enhanced */}
-        <button
-          onClick={() => setIsAutoPlay(!isAutoPlay)}
-          className="absolute top-2.5 right-2.5 z-20 bg-white/30 hover:bg-white/50 text-white p-1.5 rounded-full backdrop-blur-md transition-all shadow-lg"
-          title={isAutoPlay ? "Pause auto-play" : "Resume auto-play"}
-        >
-          {isAutoPlay ? (
-            <Pause className="h-3 w-3" />
-          ) : (
-            <Play className="h-3 w-3" />
-          )}
-        </button>
-      </div>
-
-      {/* Motto Below Image - VISIBLE with border */}
-      <div 
-        className="text-center px-3 py-2.5 bg-gradient-to-r from-white/5 to-white/5 backdrop-blur-sm border border-brandLightGreen/30 rounded-lg hover:border-brandLightGreen/60 transition-colors"
-        style={{
-          fontFamily: "'Poppins', 'Segoe UI', sans-serif",
-          fontSize: "12px",
-          fontWeight: "600",
-          letterSpacing: "0.4px"
-        }}
-      >
-        <p className="text-white/90 leading-relaxed">{currentBanner.motto}</p>
-      </div>
-
-      {/* Progress bar - Enhanced */}
-      <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden shadow-inner">
-        <div
-          className={`h-full bg-gradient-to-r ${currentBanner.color} transition-all duration-500 shadow-lg`}
-          style={{ width: `${((currentImageIndex + 1) / bannerData.length) * 100}%` }}
-        />
-      </div>
-
-      {/* Indicator Dots - Enhanced */}
-      <div className="flex justify-center gap-2 items-center">
-        {bannerData.map((_, idx) => (
-          <button
-            key={idx}
-            onClick={() => {
-              setCurrentImageIndex(idx);
-              setIsAutoPlay(false);
-            }}
-            className={`transition-all duration-300 rounded-full ${
-              idx === currentImageIndex
-                ? `w-7 h-2.5 bg-gradient-to-r ${bannerData[idx].color} shadow-lg`
-                : "w-2 h-2 bg-white/30 hover:bg-white/70"
-            }`}
-            title={bannerData[idx].motto}
-          />
-        ))}
-      </div>
-
-    </div>
-  );
-}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -464,22 +328,39 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <header className="flex h-28 shrink-0 items-center justify-between bg-[#1b4324] px-4 text-white shadow-md z-10 border-b border-white/10">
         
         {/* Left header segment - Logo and Title */}
-        <div className="flex items-end gap-0.10 pb-5">
-          {/* Combined Logo */}
-          <img 
-            src="/logos.png" 
-            alt="Cabadbaran Health Logo" 
-            className="h-24 w-auto object-contain drop-shadow-lg flex-shrink-0"
-          />
-          
+        <div className="flex items-center pb-3">
           {/* Title Section - positioned lower, aligned to bottom */}
           <div className="flex-1">
             <h1 className="text-lg font-black text-white uppercase leading-tight tracking-tighter">
               HEALTH MONITORING SYSTEM FOR CHILD MALNUTRITION MANAGEMENT CASES
             </h1>
-            <p className="text-sm text-brandLightGreen font-bold mt-1 tracking-tight">
-              City Health Office, Cabadbaran City
-            </p>
+            <div className="mt-1 flex items-center gap-2">
+              <p className="text-sm text-brandLightGreen font-bold tracking-tight">
+                City Health Office, Cabadbaran City
+              </p>
+              <div
+                role="img"
+                aria-label="Cabadbaran City, City Health Office and nutrition program logos"
+                className="flex shrink-0 items-center gap-1"
+              >
+                {[
+                  { size: "292% auto", position: "1% 50%" },
+                  { size: "369% auto", position: "51% 73%" },
+                  { size: "316% auto", position: "98% 100%" },
+                ].map(({ size, position }) => (
+                  <span
+                    key={`${size}-${position}`}
+                    aria-hidden="true"
+                    className="h-7 w-7 rounded-full bg-contain bg-no-repeat drop-shadow-md sm:h-8 sm:w-8"
+                    style={{
+                      backgroundImage: "url('/logos.png')",
+                      backgroundPosition: position,
+                      backgroundSize: size,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -760,10 +641,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               })}
             </nav>
 
-            {/* Nutrition Banner Section - Fixed at bottom */}
-            <div className="border-t-2 border-brandLightGreen pt-3 pb-3">
-              <NutritionBanner />
-            </div>
           </div>
 
         </aside>

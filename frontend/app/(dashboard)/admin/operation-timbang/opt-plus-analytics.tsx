@@ -208,7 +208,7 @@ export function OptPlusAnalytics({ selectedYear }: { selectedYear: number }) {
         <div className={`${wfaSeverity.bgColor} border border-slate-200 rounded-lg p-5 transition-all hover:shadow-md`}>
           <div className="flex items-start justify-between mb-3">
             <div>
-              <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">Weight for Age (WFA)</p>
+              <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">Weight-for-Age (WFA)</p>
               <p className="text-2xl font-black text-slate-900 mt-2">{wfaAffected.toFixed(1)}%</p>
               <p className="text-xs text-slate-600 mt-1">Children affected</p>
             </div>
@@ -232,7 +232,7 @@ export function OptPlusAnalytics({ selectedYear }: { selectedYear: number }) {
         <div className={`${hfaSeverity.bgColor} border border-slate-200 rounded-lg p-5 transition-all hover:shadow-md`}>
           <div className="flex items-start justify-between mb-3">
             <div>
-              <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">Height for Age (HFA)</p>
+              <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">Height-for-Age (HFA)</p>
               <p className="text-2xl font-black text-slate-900 mt-2">{hfaAffected.toFixed(1)}%</p>
               <p className="text-xs text-slate-600 mt-1">Children affected</p>
             </div>
@@ -256,7 +256,7 @@ export function OptPlusAnalytics({ selectedYear }: { selectedYear: number }) {
         <div className={`${whzSeverity.bgColor} border border-slate-200 rounded-lg p-5 transition-all hover:shadow-md`}>
           <div className="flex items-start justify-between mb-3">
             <div>
-              <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">Weight for Length/Height (WHZ)</p>
+              <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">Weight-for-Length/Height (WHZ)</p>
               <p className="text-2xl font-black text-slate-900 mt-2">{whzAffected.toFixed(1)}%</p>
               <p className="text-xs text-slate-600 mt-1">Children affected</p>
             </div>
@@ -311,7 +311,7 @@ export function OptPlusAnalytics({ selectedYear }: { selectedYear: number }) {
 
         {/* WFA Status Breakdown */}
         <div className="bg-white border border-slate-200 rounded-lg p-5">
-          <h3 className="text-sm font-extrabold text-slate-800 mb-4">⚖️ Weight for Age Breakdown</h3>
+          <h3 className="text-sm font-extrabold text-slate-800 mb-4">⚖️ Weight-for-Age (WFA) Breakdown</h3>
           <div className="h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={wfaChartData}>
@@ -329,14 +329,14 @@ export function OptPlusAnalytics({ selectedYear }: { selectedYear: number }) {
           </div>
           <div className="mt-4 p-3 bg-slate-50 rounded border border-slate-200">
             <p className="text-xs text-slate-700">
-              <span className="font-semibold">⚖️ Interpretation:</span> WFA combines weight and age to assess overall nutrition. Underweight children need calorie-rich foods; overweight children need balanced, portion-controlled diets.
+              <span className="font-semibold">⚖️ Interpretation:</span> Weight-for-Age (WFA) combines weight and age to assess overall nutrition. Underweight children need calorie-rich foods; overweight children need balanced, portion-controlled diets.
             </p>
           </div>
         </div>
 
         {/* HFA Status Breakdown */}
         <div className="bg-white border border-slate-200 rounded-lg p-5">
-          <h3 className="text-sm font-extrabold text-slate-800 mb-4">📏 Height for Age Breakdown</h3>
+          <h3 className="text-sm font-extrabold text-slate-800 mb-4">📏 Height-for-Age (HFA) Breakdown</h3>
           <div className="h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={hfaChartData}>
@@ -361,7 +361,7 @@ export function OptPlusAnalytics({ selectedYear }: { selectedYear: number }) {
 
         {/* WHZ Status Breakdown */}
         <div className="bg-white border border-slate-200 rounded-lg p-5">
-          <h3 className="text-sm font-extrabold text-slate-800 mb-4">⚖️ Weight for Length/Height Breakdown</h3>
+          <h3 className="text-sm font-extrabold text-slate-800 mb-4">⚖️ Weight-for-Length/Height (WHZ) Breakdown</h3>
           <div className="h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={whzChartData}>
@@ -390,7 +390,7 @@ export function OptPlusAnalytics({ selectedYear }: { selectedYear: number }) {
       {/* WFA Detail Table */}
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
         <div className="bg-gradient-to-r from-slate-700 to-slate-600 text-white p-4">
-          <h3 className="font-bold">⚖️ Weight for Age (WFA) - Detailed Breakdown</h3>
+          <h3 className="font-bold">⚖️ Weight-for-Age (WFA) - Detailed Breakdown</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -440,7 +440,7 @@ export function OptPlusAnalytics({ selectedYear }: { selectedYear: number }) {
       {/* HFA Detail Table */}
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
         <div className="bg-gradient-to-r from-slate-700 to-slate-600 text-white p-4">
-          <h3 className="font-bold">📏 Height for Age (HFA) - Detailed Breakdown</h3>
+          <h3 className="font-bold">📏 Height-for-Age (HFA) - Detailed Breakdown</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -490,7 +490,7 @@ export function OptPlusAnalytics({ selectedYear }: { selectedYear: number }) {
       {/* WHZ Detail Table */}
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
         <div className="bg-gradient-to-r from-slate-700 to-slate-600 text-white p-4">
-          <h3 className="font-bold">⚖️ Weight for Length/Height (WHZ) - Detailed Breakdown</h3>
+          <h3 className="font-bold">⚖️ Weight-for-Length/Height (WHZ) - Detailed Breakdown</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">

@@ -20,12 +20,28 @@ import {
   type TileLayerKey,
 } from "./cabadbaran";
 
+// ─── Helper: coordinate validation ───────────────────────────────────────────
+function isValidCoordinate(lat: unknown, lng: unknown): boolean {
+  return (
+    typeof lat === "number" && Number.isFinite(lat) &&
+    typeof lng === "number" && Number.isFinite(lng) &&
+    lat !== 0 && lng !== 0 &&
+    lat >= -90 && lat <= 90 &&
+    lng >= -180 && lng <= 180
+  );
+}
+
+function formatCoordinate(value: unknown, digits = 5): string {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "N/A";
+}
+
 // ─── Helper: pan/zoom controller ─────────────────────────────────────────────
 function MapCenterController({ center, zoom }: { center: [number, number]; zoom: number }) {
   const map = useMap();
   useEffect(() => {
     try {
-      if (map) {
+      if (map && map.getContainer().isConnected) {
+        map.stop();
         map.setView(center, zoom);
       }
     } catch (err) {
@@ -115,12 +131,12 @@ function pinIcon(status: string | undefined) {
       <circle cx="12" cy="12" r="5" fill="#fff" opacity="0.85"/>
     </svg>`
   );
-  return new L.Icon({
-    iconUrl: `data:image/svg+xml,${svg}`,
-    iconSize: [14, 21],
-    iconAnchor: [7, 21],
-    popupAnchor: [0, -22],
-  });
+return new L.Icon({
+        iconUrl: `data:image/svg+xml,${svg}`,
+        iconSize: [10, 15],
+        iconAnchor: [5, 15],
+        popupAnchor: [0, -17],
+      });
 }
 
 // ─── Invisible barangay boundary style ───────────────────────────────────────
@@ -423,6 +439,12 @@ function buildPopupHtml(props: BarangaySeverity) {
       <!-- Divider -->
       <div style="height:2px;background:#e2e8f0;margin-bottom:10px;"></div>
 
+      <!-- Location -->
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;font-size:10px;color:#334155;">
+        <span style="font-weight:700;color:#475569;">📍 Location</span>
+        <span style="font-family:monospace;font-weight:600;">${formatCoordinate(props.lat)}°N, ${formatCoordinate(props.lng)}°E</span>
+      </div>
+
       <!-- Footer: Key Metrics Bar (EXPANDED for wider popup) -->
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;padding:10px 0;font-size:10px;">
         <div style="text-align:center;padding-right:8px;border-right:1px solid #e2e8f0;">
@@ -461,9 +483,8 @@ function IDWCanvasLayer({ data, showLabels = true, colorMode = "red-yellow-green
     if (!data || data.length === 0) return;
 
     const pts = data
-      .map((b) => b.lat && b.lng ? { lat: b.lat, lng: b.lng, w: getWeight(b.malnutrition_count) } : null)
+      .map((b) => isValidCoordinate(b.lat, b.lng) ? { lat: b.lat, lng: b.lng, w: getWeight(b.malnutrition_count) } : null)
       .filter(Boolean) as { lat: number; lng: number; w: number }[];
-
     const CW = 400, CH = 400;
     const raw = document.createElement("canvas");
     raw.width = CW; raw.height = CH;
@@ -488,7 +509,14 @@ function IDWCanvasLayer({ data, showLabels = true, colorMode = "red-yellow-green
         if (minDist >= maxRadius) {
           px[i] = px[i+1] = px[i+2] = px[i+3] = 0;
         } else {
-          const intensity = idw(lat, lng, pts);
+          // Keep each pixel in the nearest barangay's case-count band. IDW blending
+          // can otherwise turn a low-count barangay orange because of a nearby high one.
+          const nearestPoint = pts.reduce((nearest, point) => {
+            const distance = (lat - point.lat) ** 2 + (lng - point.lng) ** 2;
+            const nearestDistance = (lat - nearest.lat) ** 2 + (lng - nearest.lng) ** 2;
+            return distance < nearestDistance ? point : nearest;
+          });
+          const intensity = nearestPoint.w;
           const [r, g, b] = intensityToRGB(intensity);
           const ratio = minDist / maxRadius;
           const fade = Math.cos(ratio * Math.PI / 2) ** 2;
@@ -644,6 +672,58 @@ function LayerIconsOverlay({
   }, [showHotspots, showProgramCoverage, showHomeVisits, showFacilities, showPredictions, barangayList]);
 
   return null;
+}
+
+function ChildMarkersLayer({
+  markers,
+  showProgramCoverage,
+  heatmapOn,
+}: {
+  markers: any[];
+  showProgramCoverage: boolean;
+  heatmapOn: boolean;
+}) {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+
+  useEffect(() => {
+    const updateZoom = () => setZoom(map.getZoom());
+    map.on("zoomend", updateZoom);
+    return () => map.off("zoomend", updateZoom);
+  }, [map]);
+
+  if (!showProgramCoverage || heatmapOn || zoom < 15) return null;
+
+  return (
+    <>
+      {markers.map((marker: any) => (
+        <Marker
+          key={marker.id}
+          position={[marker.lat, marker.lng]}
+          icon={pinIcon(marker.overall_status)}
+          eventHandlers={{
+            mouseover: (event) => event.target.openPopup(),
+            mouseout: (event) => event.target.closePopup(),
+          }}
+        >
+          <Popup closeButton={false} autoClose closeOnClick={false}>
+            <strong className="block text-slate-800">{marker.name}</strong>
+            <span className="text-xs font-semibold" style={{ color: getStatusColor(marker.overall_status).hex }}>
+              {(marker.overall_status ?? "normal").replace(/_/g, " ")}
+            </span>
+            <br />
+            <span className="text-xs text-slate-500">
+              Age: {marker.age_months} months
+              <br />
+              Last measured: {marker.last_measured}
+              <br />
+              Lat: {formatCoordinate(marker.lat)}, Lng: {formatCoordinate(marker.lng)}
+            </span>
+          </Popup>
+        </Marker>
+      ))}
+    </>
+  );
 }
 
 // ─── Helper: detect clicked feature and navigate ─────────────────────────────
@@ -1024,15 +1104,6 @@ function BarangayGeoJSON({
                 console.warn('[BarangayGeoJSON] Error on mouseover:', err);
               }
             },
-            mousemove: (e) => {
-              try {
-                // Update mouse position while hovering
-                const mouseEvent = e.originalEvent as MouseEvent;
-                onHover(feature, { x: mouseEvent.clientX, y: mouseEvent.clientY });
-              } catch (err) {
-                // Ignore errors
-              }
-            },
             mouseout: (e) => {
               try {
                 const target = e.target as L.Polygon;
@@ -1190,7 +1261,7 @@ export function MapView({
     queryFn: () => api.get(`/api/children`, { params: { purok_id: selectedPurokId } }).then(r => r.data),
     enabled: !!selectedPurokId && showPurokModal,
   });
-  
+
   const handleHover = (feature: any | null, position: { x: number; y: number } | null) => {
     setHoveredFeature(feature);
     setMousePosition(position);
@@ -1249,7 +1320,7 @@ export function MapView({
   });
 
   const markers = useMemo(() =>
-    (markersData ?? []).filter((m: any) => m.lat && m.lng),
+    (markersData ?? []).filter((m: any) => isValidCoordinate(m.lat, m.lng)),
     [markersData]
   );
 
@@ -1299,9 +1370,20 @@ export function MapView({
     };
   }, [filteredBarangaysData]);
 
+  // Resolve the selected purok's coordinates from its map feature (marked at the exact recorded location)
+  const selectedPurokCoords = useMemo(() => {
+    if (!selectedPurokId || !purokFeatures?.features) return null;
+    const feat = purokFeatures.features.find((f: any) => f.properties?.id === selectedPurokId);
+    const lat = feat?.properties?.lat;
+    const lng = feat?.properties?.lng;
+    return isValidCoordinate(lat, lng) ? { lat, lng } : null;
+  }, [selectedPurokId, purokFeatures]);
+
   // List used for IDW heatmap
   const barangayList: BarangaySeverity[] = useMemo(() =>
-    (filteredBarangaysData?.features?.map((f: any) => f.properties) ?? []),
+    (filteredBarangaysData?.features
+      ?.filter((f: any) => f.properties?.featureType !== "purok")
+      .map((f: any) => f.properties) ?? []),
     [filteredBarangaysData]
   );
 
@@ -1321,7 +1403,7 @@ export function MapView({
       if (barangayFeature) {
         const lat = barangayFeature.properties?.lat;
         const lng = barangayFeature.properties?.lng;
-        if (lat && lng) {
+        if (isValidCoordinate(lat, lng)) {
           console.log('[MapView] Admin - Centering on barangay:', barangayFeature.properties?.name, `[${lat}, ${lng}]`);
           return [lat, lng];
         }
@@ -1377,7 +1459,6 @@ export function MapView({
 
       <div className="flex-1 w-full min-h-0 relative overflow-hidden">
         <MapContainer 
-          key={`map-${user?.id}-${user?.barangay_id}`}
           {...CABADBARAN_MAP_OPTIONS} 
           className={CABADBARAN_MAP_CLASS} 
           style={{ height: "100%", width: "100%", display: "block" }}
@@ -1401,8 +1482,8 @@ export function MapView({
           {/* For Heatmap tile layer mode, show ONLY heatmap with minimal background - no street labels */}
           {tileKey === "Heatmap" && (
             <TileLayer 
-              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-              attribution="&copy; OpenStreetMap contributors &copy; CARTO"
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution="&copy; OpenStreetMap contributors"
               zIndex={100}
               opacity={0.15}
             />
@@ -1443,23 +1524,11 @@ export function MapView({
             interactive={false}
           />
 
-          {/* Child pin markers — visible based on layer settings */}
-          {(showProgramCoverage || showHomeVisits || !heatmapOn) && markers.map((m: any) => (
-            <Marker key={m.id} position={[m.lat, m.lng]} icon={pinIcon(m.overall_status)}>
-              <Popup>
-                <strong className="block text-slate-800">{m.name}</strong>
-                <span className="text-xs font-semibold" style={{ color: getStatusColor(m.overall_status).hex }}>
-                  {(m.overall_status ?? "normal").replace(/_/g, " ")}
-                </span>
-                <br />
-                <span className="text-xs text-slate-500">
-                  Age: {m.age_months} months
-                  <br />
-                  Last measured: {m.last_measured}
-                </span>
-              </Popup>
-            </Marker>
-          ))}
+          <ChildMarkersLayer
+            markers={markers}
+            showProgramCoverage={showProgramCoverage}
+            heatmapOn={heatmapOn}
+          />
 
           {/* IDW heatmap overlay — show when: toggle is ON AND showHotspots is true AND choropleth is OFF, OR when Heatmap tile layer is selected AND choropleth is OFF */}
           {((heatmapOn && showHotspots) || tileKey === "Heatmap") && !choroplethOn && barangayList.length > 0 && (
@@ -1471,15 +1540,15 @@ export function MapView({
             />
           )}
 
-          {/* Layer icons overlay on barangays */}
           <LayerIconsOverlay
-            showHotspots={showHotspots}
+            showHotspots={showHotspots && !heatmapOn}
             showProgramCoverage={showProgramCoverage}
             showHomeVisits={showHomeVisits}
             showFacilities={showFacilities}
             showPredictions={showPredictions}
             barangayList={barangayList}
           />
+
         </MapContainer>
       </div>
 
@@ -1682,6 +1751,18 @@ export function MapView({
                       <div>
                         <p className="text-slate-500 font-semibold">Health Worker:</p>
                         <p className="text-slate-800">{purokDetailsQ.data.assigned_health_worker || "N/A"}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 font-semibold">Latitude:</p>
+                        <p className="text-slate-800 font-mono">
+                          {selectedPurokCoords ? formatCoordinate(selectedPurokCoords.lat) : "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 font-semibold">Longitude:</p>
+                        <p className="text-slate-800 font-mono">
+                          {selectedPurokCoords ? formatCoordinate(selectedPurokCoords.lng) : "N/A"}
+                        </p>
                       </div>
                     </div>
                     {purokDetailsQ.data.notes && (

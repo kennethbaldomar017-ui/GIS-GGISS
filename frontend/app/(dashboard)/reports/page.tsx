@@ -20,6 +20,37 @@ function formatDate(d: string) {
   });
 }
 
+// Resolve a valid Cabadbaran-area coordinate for a barangay record.
+// Prefers explicit lat/lng, then the geometry centroid, and falls back to the
+// city center only when no valid coordinate is available.
+function resolveBarangayPoint(b: any): { latitude: number; longitude: number } {
+  const fallback = { latitude: 9.118, longitude: 125.565 };
+  const lat = Number(b.latitude);
+  const lng = Number(b.longitude);
+  if (
+    Number.isFinite(lat) && Number.isFinite(lng) &&
+    lat !== 0 && lng !== 0 &&
+    lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
+  ) {
+    return { latitude: lat, longitude: lng };
+  }
+  const geometry = b.geometry;
+  try {
+    const ring = geometry?.type === "Polygon" ? geometry.coordinates?.[0] : null;
+    if (ring && ring.length) {
+      const avgLat = ring.reduce((sum: number, c: any) => sum + Number(c[1]), 0) / ring.length;
+      const avgLng = ring.reduce((sum: number, c: any) => sum + Number(c[0]), 0) / ring.length;
+      if (Number.isFinite(avgLat) && Number.isFinite(avgLng) && avgLat !== 0 && avgLng !== 0 &&
+          avgLat >= -90 && avgLat <= 90 && avgLng >= -180 && avgLng <= 180) {
+        return { latitude: avgLat, longitude: avgLng };
+      }
+    }
+  } catch {
+    // ignore malformed geometry
+  }
+  return fallback;
+}
+
 export default function ReportsPage() {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
@@ -196,15 +227,18 @@ export default function ReportsPage() {
         hotspots: (barangays || [])
           .filter((b: any) => b.risk_level === "critical" || b.risk_level === "high")
           .slice(0, 5)
-          .map((b: any) => ({
-            name: b.barangay_name || b.name,
-            latitude: b.latitude || 11.28,
-            longitude: b.longitude || 123.28,
-            intensity: b.risk_score || 0,
-            caseCount: (b.underweight_count || 0) + (b.stunted_count || 0) + (b.wasted_count || 0) + (b.severe_count || 0),
-            radius: 2.0,
-            description: `High concentration of nutrition cases - Risk: ${b.risk_level}`,
-          })),
+          .map((b: any) => {
+            const point = resolveBarangayPoint(b);
+            return {
+              name: b.barangay_name || b.name,
+              latitude: point.latitude,
+              longitude: point.longitude,
+              intensity: b.risk_score || 0,
+              caseCount: (b.underweight_count || 0) + (b.stunted_count || 0) + (b.wasted_count || 0) + (b.severe_count || 0),
+              radius: 2.0,
+              description: `High concentration of nutrition cases - Risk: ${b.risk_level}`,
+            };
+          }),
       },
       programAccomplishment: {
         summary: `${programs.length} programs implemented with strong target achievement.`,
@@ -1033,15 +1067,15 @@ function OptPlusReportTableSection() {
               <p className="text-xl font-black text-green-900 mt-1">{data.children_0_59_months.toLocaleString()}</p>
             </div>
             <div className="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-lg p-3">
-              <p className="text-xs font-semibold text-purple-700 uppercase">Total WFA</p>
+              <p className="text-xs font-semibold text-purple-700 uppercase">Total Weight-for-Age (WFA)</p>
               <p className="text-xl font-black text-purple-900 mt-1">{data.total_wfa}</p>
             </div>
             <div className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-lg p-3">
-              <p className="text-xs font-semibold text-orange-700 uppercase">Total HFA</p>
+              <p className="text-xs font-semibold text-orange-700 uppercase">Total Height-for-Age (HFA)</p>
               <p className="text-xl font-black text-orange-900 mt-1">{data.total_hfa}</p>
             </div>
             <div className="bg-gradient-to-br from-red-50 to-red-100 border border-red-200 rounded-lg p-3">
-              <p className="text-xs font-semibold text-red-700 uppercase">Total WFL/H</p>
+              <p className="text-xs font-semibold text-red-700 uppercase">Total Weight-for-Length/Height (WFL/H)</p>
               <p className="text-xl font-black text-red-900 mt-1">{data.total_wflh}</p>
             </div>
           </div>

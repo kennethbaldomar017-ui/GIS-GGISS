@@ -253,15 +253,15 @@ export default function OptPlusReportPage() {
                 <p className="text-2xl font-black text-green-900">{data.children_0_59_months.toLocaleString()}</p>
               </div>
               <div className="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-lg p-3">
-                <p className="text-xs font-semibold text-purple-700 uppercase">Total WFA</p>
+                <p className="text-xs font-semibold text-purple-700 uppercase">Total Weight-for-Age (WFA)</p>
                 <p className="text-2xl font-black text-purple-900">{data.total_wfa.toLocaleString()}</p>
               </div>
               <div className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-lg p-3">
-                <p className="text-xs font-semibold text-orange-700 uppercase">Total HFA</p>
+                <p className="text-xs font-semibold text-orange-700 uppercase">Total Height-for-Age (HFA)</p>
                 <p className="text-2xl font-black text-orange-900">{data.total_hfa.toLocaleString()}</p>
               </div>
               <div className="bg-gradient-to-br from-red-50 to-red-100 border border-red-200 rounded-lg p-3">
-                <p className="text-xs font-semibold text-red-700 uppercase">Total WFL/H</p>
+                <p className="text-xs font-semibold text-red-700 uppercase">Total Weight-for-Length/Height (WFL/H)</p>
                 <p className="text-2xl font-black text-red-900">{data.total_wflh.toLocaleString()}</p>
               </div>
             </div>

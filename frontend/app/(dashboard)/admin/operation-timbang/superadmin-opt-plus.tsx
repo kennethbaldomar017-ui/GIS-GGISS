@@ -369,7 +369,7 @@ export default function SuperAdminOPTPlusPage() {
               <p className="text-emerald-100 text-xs font-semibold uppercase">Children Measured</p>
               <p className="text-3xl font-bold mt-2">{summary.total_children_measured}</p>
               <p className="text-emerald-100 text-xs mt-1">
-                WFA: {summary.total_valid_wfa} • HFA: {summary.total_valid_hfa}
+                Weight-for-Age: {summary.total_valid_wfa} • Height-for-Age: {summary.total_valid_hfa}
               </p>
             </div>
             <Users className="h-12 w-12 text-emerald-200 opacity-50" />
@@ -433,10 +433,10 @@ export default function SuperAdminOPTPlusPage() {
                   Barangay
                 </th>
                 <th rowSpan={3} className="px-2 py-2 text-center font-semibold border border-slate-600 min-w-[60px]">
-                  Valid<br/>WFA
+                  Valid<br/>Weight-for-Age
                 </th>
                 <th rowSpan={3} className="px-2 py-2 text-center font-semibold border border-slate-600 min-w-[60px]">
-                  Valid<br/>HFA
+                  Valid<br/>Height-for-Age
                 </th>
                 <th rowSpan={3} className="px-2 py-2 text-center font-semibold border border-slate-600 min-w-[60px]">
                   Valid<br/>WFL/H
@@ -1017,15 +1017,15 @@ function SuperAdminOptPlusReportSection({ selectedYear }: { selectedYear: number
                 <p className="text-xl font-black text-green-900 mt-1">{data.children_0_59_months.toLocaleString()}</p>
               </div>
               <div className="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-lg p-3">
-                <p className="text-xs font-semibold text-purple-700 uppercase">WFA</p>
+                <p className="text-xs font-semibold text-purple-700 uppercase">Weight-for-Age (WFA)</p>
                 <p className="text-xl font-black text-purple-900 mt-1">{data.total_wfa}</p>
               </div>
               <div className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-lg p-3">
-                <p className="text-xs font-semibold text-orange-700 uppercase">HFA</p>
+                <p className="text-xs font-semibold text-orange-700 uppercase">Height-for-Age (HFA)</p>
                 <p className="text-xl font-black text-orange-900 mt-1">{data.total_hfa}</p>
               </div>
               <div className="bg-gradient-to-br from-red-50 to-red-100 border border-red-200 rounded-lg p-3">
-                <p className="text-xs font-semibold text-red-700 uppercase">WFL/H</p>
+                <p className="text-xs font-semibold text-red-700 uppercase">Weight-for-Length/Height (WFL/H)</p>
                 <p className="text-xl font-black text-red-900 mt-1">{data.total_wflh}</p>
               </div>
             </div>

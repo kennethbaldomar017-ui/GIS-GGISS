@@ -15,6 +15,162 @@ from ..routers.children import age_months
 router = APIRouter(prefix="/api/maps", tags=["maps"])
 
 
+# Default coordinates used by imported seed data (Butuan City center). These
+# are NOT valid Cabadbaran locations and must never be used for mapping/centroids.
+BUTUAN_DEFAULT_COORDS = (8.9483, 125.5282)
+
+BARANGAY_COORDINATES = {
+    "Antonio Luna": (9.0827, 125.5911),
+    "Bay-ang": (9.1041, 125.5773),
+    "Bayabas": (9.1455, 125.5937),
+    "Caasinan": (9.1362, 125.5236),
+    "Cabinet": (9.1245, 125.5268),
+    "Calamba": (9.0985, 125.6006),
+    "Calibunan": (9.1057, 125.5338),
+    "Comagascas": (9.1350, 125.5587),
+    "Concepcion": (9.1807, 125.5822),
+    "Del Pilar": (9.1513, 125.5840),
+    "Katugasan": (9.1313, 125.5837),
+    "Kauswagan": (9.1299, 125.5309),
+    "La Union": (9.0986, 125.5518),
+    "Mabini": (9.1129, 125.5523),
+    "Mahaba": (9.1171, 125.6329),
+    "Puting Bato": (9.1263, 125.6368),
+    "Sanghan": (9.0878, 125.5709),
+    "Soriano": (9.0967, 125.5684),
+    "Tolosa": (9.1175, 125.5255),
+    "Poblacion 1": (9.1232, 125.5330),
+    "Poblacion 2": (9.1238, 125.5337),
+    "Poblacion 3": (9.1233, 125.5297),
+    "Poblacion 4": (9.1194, 125.5325),
+    "Poblacion 5": (9.1189, 125.5338),
+    "Poblacion 6": (9.1206, 125.5339),
+    "Poblacion 7": (9.1250, 125.5373),
+    "Poblacion 8": (9.1229, 125.5361),
+    "Poblacion 9": (9.1227, 125.5420),
+    "Poblacion 10": (9.1206, 125.5367),
+    "Poblacion 11": (9.1182, 125.5354),
+    "Poblacion 12": (9.1178, 125.5410),
+}
+
+
+def barangay_coordinates(barangay: Barangay) -> tuple[float, float] | None:
+    """Return supplied authoritative coordinates, falling back to geometry."""
+    return BARANGAY_COORDINATES.get(barangay.name) or get_polygon_centroid(barangay.geometry)
+
+
+def child_point(lat, lng):
+    """
+    Child coordinates as a valid (lat, lng) pair, or None.
+
+    Wraps sanitize_coords and additionally rejects the known seed-data
+    default coordinate so clusters/markers never land outside Cabadbaran.
+    """
+    coords = sanitize_coords(lat, lng)
+    if coords is None:
+        return None
+    if abs(coords[0] - BUTUAN_DEFAULT_COORDS[0]) < 1e-6 and abs(coords[1] - BUTUAN_DEFAULT_COORDS[1]) < 1e-6:
+        return None
+    return coords
+
+
+def sanitize_coords(lat, lng):
+    """
+    Validate and normalize a latitude/longitude pair.
+
+    Handles missing, invalid, and reversed coordinates safely:
+    - Returns None when either coordinate is missing, non-numeric, or zero.
+    - Swaps lat/lng when they were recorded in reversed order.
+    - Enforces valid world ranges (lat: -90..90, lng: -180..180).
+
+    Returns a (lat, lng) tuple of floats when valid, otherwise None.
+    """
+    if lat is None or lng is None:
+        return None
+    try:
+        lat = float(lat)
+        lng = float(lng)
+    except (TypeError, ValueError):
+        return None
+    if lat == 0.0 or lng == 0.0:
+        return None
+    # Detect reversed coordinates: one value looks like a longitude while the
+    # other looks like a latitude (e.g. latitude stored as 125.56, longitude as 9.12).
+    if -90 <= lng <= 90 and not (-90 <= lat <= 90):
+        lat, lng = lng, lat
+    if -90 <= lat <= 90 and -180 <= lng <= 180:
+        return (lat, lng)
+    return None
+
+
+def get_polygon_centroid(geometry: dict) -> tuple[float, float] | None:
+    """Calculate an area-weighted centroid from GeoJSON Polygon/MultiPolygon geometry."""
+    if not geometry:
+        return None
+    if geometry.get("type") == "Polygon":
+        polygons = [geometry.get("coordinates") or []]
+    elif geometry.get("type") == "MultiPolygon":
+        polygons = geometry.get("coordinates") or []
+    else:
+        return None
+
+    total_area = 0.0
+    total_lng = 0.0
+    total_lat = 0.0
+    for polygon in polygons:
+        ring = polygon[0] if polygon else []
+        if len(ring) < 3:
+            continue
+        area_twice = 0.0
+        centroid_lng = 0.0
+        centroid_lat = 0.0
+        for index, (lng_a, lat_a) in enumerate(ring[:-1]):
+            lng_b, lat_b = ring[index + 1]
+            cross = lng_a * lat_b - lng_b * lat_a
+            area_twice += cross
+            centroid_lng += (lng_a + lng_b) * cross
+            centroid_lat += (lat_a + lat_b) * cross
+        if abs(area_twice) < 1e-12:
+            continue
+        area = abs(area_twice) / 2
+        total_area += area
+        total_lng += (centroid_lng / (3 * area_twice)) * area
+        total_lat += (centroid_lat / (3 * area_twice)) * area
+
+    if total_area == 0:
+        return None
+    return sanitize_coords(total_lat / total_area, total_lng / total_area)
+
+
+# Half-size (degrees) of the small square drawn around each barangay centroid.
+# Barangay centroids are ~0.003 deg apart in the Poblacion grid, so squares must
+# be smaller than that or neighbouring boundaries overlap on the map.
+BARANGAY_SQUARE_HALF = 0.00125
+
+
+def compact_barangay_feature(b, props):
+    """
+    Barangay GeoJSON feature whose boundary is a small square around its
+    centroid. The square hugs the child marker pins so boundaries never
+    overlap neighbouring barangays. Pins themselves keep their real coords.
+    """
+    lat = props.get("lat")
+    lng = props.get("lng")
+    f = feature(b, props)
+    if lat is None or lng is None:
+        return f
+    h = BARANGAY_SQUARE_HALF
+    f["geometry"] = {
+        "type": "MultiPolygon",
+        "coordinates": [[[
+            [lng - h, lat - h], [lng + h, lat - h],
+            [lng + h, lat + h], [lng - h, lat + h],
+            [lng - h, lat - h],
+        ]]],
+    }
+    return f
+
+
 @router.get("/heatmap-points")
 async def heatmap_points(barangay_id: UUID | None = None, indicator: str = "wasting", db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     if user.role.value == "admin":
@@ -22,9 +178,12 @@ async def heatmap_points(barangay_id: UUID | None = None, indicator: str = "wast
     rows = await latest_measurements(db, barangay_id)
     points = []
     for m in rows:
+        coords = child_point(m.child.latitude, m.child.longitude)
+        if coords is None:
+            continue
         status = {"wasting": m.whz_status.value, "stunting": m.haz_status.value, "underweight": m.waz_status.value}.get(indicator, m.whz_status.value)
         intensity = 1.0 if status.startswith("severely") else 0.6 if status in {"wasted", "stunted", "underweight"} else 0
-        points.append({"lat": m.child.latitude, "lng": m.child.longitude, "intensity": intensity})
+        points.append({"lat": coords[0], "lng": coords[1], "intensity": intensity})
     return points
 
 
@@ -95,10 +254,8 @@ async def get_barangay_boundary(db: AsyncSession = Depends(get_db), user: User =
         risk_level = "low"
     
     # Get centroid
-    lat, lng = 9.118, 125.565
-    if barangay.geometry and "coordinates" in barangay.geometry:
-        coords = barangay.geometry["coordinates"][0][0][0]
-        lng, lat = coords[0], coords[1]
+    centroid = barangay_coordinates(barangay)
+    lat, lng = centroid if centroid else (None, None)
     
     # Return barangay boundary as GeoJSON feature
     return {
@@ -127,7 +284,8 @@ async def barangay_choropleth(barangay_name: str | None = None, db: AsyncSession
     features = []
     if user.role.value == "super_admin":
         # Exclude barangays not part of Cabadbaran City (e.g. Concepcion)
-        query = select(Barangay).where(Barangay.name.notin_(EXCLUDED_BARANGAYS)).order_by(Barangay.name)
+        map_excluded_barangays = EXCLUDED_BARANGAYS - {"Concepcion"}
+        query = select(Barangay).where(Barangay.name.notin_(map_excluded_barangays)).order_by(Barangay.name)
         
         # If a specific barangay is requested, filter to it
         if barangay_name:
@@ -180,12 +338,10 @@ async def barangay_choropleth(barangay_name: str | None = None, db: AsyncSession
             alert_count = alert_counts_map.get(b.id, 0)
             
             # Use centroid coordinates for static markers on maps
-            lat, lng = 9.118, 125.565
-            if b.geometry and "coordinates" in b.geometry:
-                coords = b.geometry["coordinates"][0][0][0]
-                lng, lat = coords[0], coords[1]
+            centroid = barangay_coordinates(b)
+            lat, lng = centroid if centroid else (None, None)
                 
-            features.append(feature(b, {
+            features.append(compact_barangay_feature(b, {
                 "name": b.name,
                 "risk_level": risk_level,
                 "prevalence_rate": malnutrition_rate,
@@ -201,7 +357,7 @@ async def barangay_choropleth(barangay_name: str | None = None, db: AsyncSession
     elif user.role.value == "admin":
         # Get parent barangay for boundary display
         parent_brgy = await db.get(Barangay, user.barangay_id)
-        fallback_lat, fallback_lng = 9.118, 125.565
+        fallback_lat, fallback_lng = None, None
         
         # Add the barangay boundary as a feature so admin sees their barangay polygon
         if parent_brgy and parent_brgy.geometry:
@@ -222,11 +378,12 @@ async def barangay_choropleth(barangay_name: str | None = None, db: AsyncSession
                 risk_level = "low"
             
             # Get barangay center coordinates
-            coords = parent_brgy.geometry["coordinates"][0][0][0]
-            fallback_lng, fallback_lat = coords[0], coords[1]
+            centroid = barangay_coordinates(parent_brgy)
+            if centroid:
+                fallback_lat, fallback_lng = centroid
             
             # Add barangay boundary feature
-            features.append(feature(parent_brgy, {
+            features.append(compact_barangay_feature(parent_brgy, {
                 "name": parent_brgy.name,
                 "risk_level": risk_level,
                 "prevalence_rate": malnutrition_rate,
@@ -243,18 +400,6 @@ async def barangay_choropleth(barangay_name: str | None = None, db: AsyncSession
         # Get puroks
         puroks = (await db.scalars(select(Purok).where(Purok.barangay_id == user.barangay_id).order_by(Purok.name))).all()
         measurements = await latest_measurements(db, user.barangay_id)
-            
-        def get_centroid_from_polygon(geometry: dict) -> tuple[float, float] | None:
-            """Extract centroid from polygon geometry"""
-            if not geometry or geometry.get("type") != "Polygon":
-                return None
-            coords = geometry.get("coordinates", [[]])[0]
-            if not coords:
-                return None
-            # Calculate centroid using the average of all points
-            lats = [c[1] for c in coords]
-            lngs = [c[0] for c in coords]
-            return (sum(lats) / len(lats), sum(lngs) / len(lngs))
         
         for p in puroks:
             subset = [m for m in measurements if m.child.purok_id == p.id]
@@ -277,23 +422,20 @@ async def barangay_choropleth(barangay_name: str | None = None, db: AsyncSession
                 risk_level = "low"  # Green on map
             
             # Priority 1: Get centroid from child measurements (most accurate)
-            lats = [m.child.latitude for m in subset if m.child.latitude]
-            lngs = [m.child.longitude for m in subset if m.child.longitude]
-            if lats:
-                p_lat = sum(lats) / len(lats)
-                p_lng = sum(lngs) / len(lngs)
-            # Priority 2: Get centroid from purok geometry (fallback)
-            elif p.geometry:
-                centroid = get_centroid_from_polygon(p.geometry)
+            p_lat, p_lng = fallback_lat, fallback_lng
+            child_coords = [child_point(m.child.latitude, m.child.longitude) for m in subset]
+            child_coords = [c for c in child_coords if c]
+            if child_coords:
+                lats = [c[0] for c in child_coords]
+                lngs = [c[1] for c in child_coords]
+                centroid = sanitize_coords(sum(lats) / len(lats), sum(lngs) / len(lngs))
                 if centroid:
                     p_lat, p_lng = centroid
-                else:
-                    p_lat = fallback_lat
-                    p_lng = fallback_lng
-            # Priority 3: Use barangay fallback
-            else:
-                p_lat = fallback_lat
-                p_lng = fallback_lng
+            # Priority 2: Get centroid from purok geometry (fallback)
+            if (p_lat, p_lng) == (fallback_lat, fallback_lng) and p.geometry:
+                centroid = get_polygon_centroid(p.geometry)
+                if centroid:
+                    p_lat, p_lng = centroid
                 
             features.append(purok_feature(p, p_lat, p_lng, {
                 "name": p.name,
@@ -333,11 +475,14 @@ async def child_markers(barangay_id: UUID | None = None, status_filter: str | No
             continue
         if status_filter and status != status_filter:
             continue
+        coords = child_point(c.latitude, c.longitude)
+        if coords is None:
+            continue
         out.append({
             "id": str(c.id),
             "name": c.full_name,
-            "lat": c.latitude,
-            "lng": c.longitude,
+            "lat": coords[0],
+            "lng": coords[1],
             "overall_status": status,
             "age_months": latest.age_in_months if latest else age_months(c.birth_date),
             "last_measured": latest.measurement_date if latest else None
@@ -351,11 +496,37 @@ async def cluster_summary(db: AsyncSession = Depends(get_db), user: User = Depen
     if user.role.value == "admin":
         stmt = stmt.where(Purok.barangay_id == user.barangay_id)
     rows = []
+
+    # Barangay-level fallback centroid for admin users
+    fallback_lat, fallback_lng = 9.118, 125.565
+    if user.role.value == "admin" and user.barangay_id:
+        parent_brgy = await db.get(Barangay, user.barangay_id)
+        if parent_brgy:
+            centroid = get_polygon_centroid(parent_brgy.geometry)
+            if centroid:
+                fallback_lat, fallback_lng = centroid
+
     measurements = await latest_measurements(db, user.barangay_id if user.role.value == "admin" else None)
     for p in (await db.scalars(stmt)).all():
         subset = [m for m in measurements if m.child.purok_id == p.id]
         prevalence = calculate_prevalence(subset)
-        rows.append({"purok_id": str(p.id), "name": p.name, "centroid_lat": 9.1833, "centroid_lng": 125.5333, "child_count": len(subset), "malnutrition_count": sum(1 for m in subset if m.overall_status.value != "normal"), "prevalence_rate": prevalence["wasting_rate"], "risk_level": classify_risk_level(prevalence)})
+
+        # Priority 1: average of child measurement coordinates (most accurate)
+        centroid_lat, centroid_lng = fallback_lat, fallback_lng
+        child_coords = [c for c in (child_point(m.child.latitude, m.child.longitude) for m in subset) if c]
+        if child_coords:
+            lats = [c[0] for c in child_coords]
+            lngs = [c[1] for c in child_coords]
+            centroid = sanitize_coords(sum(lats) / len(lats), sum(lngs) / len(lngs))
+            if centroid:
+                centroid_lat, centroid_lng = centroid
+        # Priority 2: purok geometry centroid (fallback)
+        if (centroid_lat, centroid_lng) == (fallback_lat, fallback_lng) and p.geometry:
+            centroid = get_polygon_centroid(p.geometry)
+            if centroid:
+                centroid_lat, centroid_lng = centroid
+
+        rows.append({"purok_id": str(p.id), "name": p.name, "centroid_lat": centroid_lat, "centroid_lng": centroid_lng, "child_count": len(subset), "malnutrition_count": sum(1 for m in subset if m.overall_status.value != "normal"), "prevalence_rate": prevalence["wasting_rate"], "risk_level": classify_risk_level(prevalence)})
     return rows
 
 

@@ -74,7 +74,7 @@ export default function MapPage() {
       {/* Map + sidebar - fills remaining height */}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[1fr_260px]">
         {/* Map fills all available height */}
-        <section className="relative min-h-0 h-full rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+        <section className="relative h-full min-h-[420px] rounded-xl border border-slate-200 overflow-hidden shadow-sm lg:min-h-0">
           <DynamicMap 
             showHotspots={showHotspots}
             showProgramCoverage={showProgramCoverage}

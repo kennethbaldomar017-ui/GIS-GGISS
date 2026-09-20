@@ -471,15 +471,15 @@ function OptPlusReportSection() {
                 <p className="text-xl font-black text-green-900 mt-1">{data.children_0_59_months.toLocaleString()}</p>
               </div>
               <div className="bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 rounded-lg p-3">
-                <p className="text-xs font-semibold text-purple-700 uppercase">WFA</p>
+                <p className="text-xs font-semibold text-purple-700 uppercase">Weight-for-Age (WFA)</p>
                 <p className="text-xl font-black text-purple-900 mt-1">{data.total_wfa}</p>
               </div>
               <div className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-lg p-3">
-                <p className="text-xs font-semibold text-orange-700 uppercase">HFA</p>
+                <p className="text-xs font-semibold text-orange-700 uppercase">Height-for-Age (HFA)</p>
                 <p className="text-xl font-black text-orange-900 mt-1">{data.total_hfa}</p>
               </div>
               <div className="bg-gradient-to-br from-red-50 to-red-100 border border-red-200 rounded-lg p-3">
-                <p className="text-xs font-semibold text-red-700 uppercase">WFL/H</p>
+                <p className="text-xs font-semibold text-red-700 uppercase">Weight-for-Length/Height (WFL/H)</p>
                 <p className="text-xl font-black text-red-900 mt-1">{data.total_wflh}</p>
               </div>
             </div>
@@ -656,17 +656,17 @@ function ViewModal({ record, onClose }: { record: OperationTimbangRecord | null;
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-lg p-3 border-2 border-amber-200 bg-amber-50">
                 <p className="text-xs text-amber-600 font-semibold">WFA</p>
-                <p className="text-xs text-slate-500 mt-1">Weight for Age</p>
+                <p className="text-xs text-slate-500 mt-1">Weight-for-Age</p>
                 <p className="text-lg font-bold text-amber-700 mt-2">{record.weight_for_age}</p>
               </div>
               <div className="rounded-lg p-3 border-2 border-orange-200 bg-orange-50">
                 <p className="text-xs text-orange-600 font-semibold">HFA</p>
-                <p className="text-xs text-slate-500 mt-1">Height for Age</p>
+                <p className="text-xs text-slate-500 mt-1">Height-for-Age</p>
                 <p className="text-lg font-bold text-orange-700 mt-2">{record.height_for_age}</p>
               </div>
               <div className="rounded-lg p-3 border-2 border-red-200 bg-red-50">
                 <p className="text-xs text-red-600 font-semibold">WFH</p>
-                <p className="text-xs text-slate-500 mt-1">Weight for Height</p>
+                <p className="text-xs text-slate-500 mt-1">Weight-for-Height</p>
                 <p className="text-lg font-bold text-red-700 mt-2">{record.weight_for_height}</p>
               </div>
             </div>
@@ -1223,9 +1223,9 @@ export default function OperationTimbangPage() {
                 <th className="border border-slate-600 py-2 px-2 text-center font-semibold text-xs">(kg)</th>
                 <th className="border border-slate-600 py-2 px-2 text-center font-semibold text-xs">(cm)</th>
                 <th className="border border-yellow-500 bg-yellow-300 text-slate-900 py-1 px-2 text-center font-bold text-xs">Age in Months</th>
-                <th className="border border-yellow-500 bg-yellow-300 text-slate-900 py-1 px-2 text-center font-bold text-xs">Weight for Age Status</th>
-                <th className="border border-yellow-500 bg-yellow-300 text-slate-900 py-1 px-2 text-center font-bold text-xs">Height for Age Status</th>
-                <th className="border border-yellow-500 bg-yellow-300 text-slate-900 py-1 px-2 text-center font-bold text-xs">Weight for Height/Length Status</th>
+                <th className="border border-yellow-500 bg-yellow-300 text-slate-900 py-1 px-2 text-center font-bold text-xs">Weight-for-Age Status</th>
+                <th className="border border-yellow-500 bg-yellow-300 text-slate-900 py-1 px-2 text-center font-bold text-xs">Height-for-Age Status</th>
+                <th className="border border-yellow-500 bg-yellow-300 text-slate-900 py-1 px-2 text-center font-bold text-xs">Weight-for-Height/Length Status</th>
                 <th className="border border-slate-600 py-2 px-2 text-center font-semibold text-xs"></th>
               </tr>
             </thead>

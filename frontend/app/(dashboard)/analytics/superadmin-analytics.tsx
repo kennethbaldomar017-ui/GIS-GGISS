@@ -617,9 +617,9 @@ export function SuperAdminAnalytics({
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={[
-                        { name: "WFA", count: optPlusQuery.data.total_wfa, fill: "#6366f1" },
-                        { name: "HFA", count: optPlusQuery.data.total_hfa, fill: "#8b5cf6" },
-                        { name: "WFL/H", count: optPlusQuery.data.total_wflh, fill: "#d946ef" }
+                        { name: "Weight-for-Age", count: optPlusQuery.data.total_wfa, fill: "#6366f1" },
+                        { name: "Height-for-Age", count: optPlusQuery.data.total_hfa, fill: "#8b5cf6" },
+                        { name: "Weight-for-Length/Height", count: optPlusQuery.data.total_wflh, fill: "#d946ef" }
                       ]}
                     >
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />

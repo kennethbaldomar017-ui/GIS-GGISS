@@ -19,6 +19,21 @@ import {
   type TileLayerKey,
 } from "./cabadbaran";
 
+// ─── Coordinate validation ───────────────────────────────────────────────────
+function isValidCoordinate(lat: unknown, lng: unknown): boolean {
+  return (
+    typeof lat === "number" && Number.isFinite(lat) &&
+    typeof lng === "number" && Number.isFinite(lng) &&
+    lat !== 0 && lng !== 0 &&
+    lat >= -90 && lat <= 90 &&
+    lng >= -180 && lng <= 180
+  );
+}
+
+function formatCoordinate(value: unknown, digits = 5): string {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "N/A";
+}
+
 // Helper component to programmatically pan/zoom Leaflet map
 function MapCenterController({ center, zoom }: { center: any; zoom: number }) {
   const map = useMap();
@@ -69,22 +84,22 @@ type BarangaySeverity = {
   lng?: number;
 };
 
-// ─── Legend tiers (Based on prevalence percentage, not case count) ──────────
+// ─── Legend tiers (based on malnutrition case count) ─────────────────────────
 const TIERS = [
-  { label: "Low Risk",        range: "<15%",     min: 0,    max: 14.99,   weight: 0.06, color: "#4ade80", labelColor: "#16a34a" },
-  { label: "Low-Moderate",    range: "15-19%",   min: 15,   max: 19.99,   weight: 0.25, color: "#fde047", labelColor: "#ca8a04" },
-  { label: "Moderate Risk",   range: "20-24%",   min: 20,   max: 24.99,   weight: 0.44, color: "#fdba74", labelColor: "#ea580c" },
-  { label: "Moderate-High",   range: "25-29%",   min: 25,   max: 29.99,   weight: 0.62, color: "#fb923c", labelColor: "#c2410c" },
-  { label: "High Risk",       range: "30%+",     min: 30,   max: Infinity, weight: 0.80, color: "#f87171", labelColor: "#b91c1c" },
+  { label: "Low",             range: "0-4 cases",   min: 0,  max: 4,        weight: 0.06, color: "#4ade80", labelColor: "#16a34a" },
+  { label: "Low-Moderate",    range: "5-9 cases",   min: 5,  max: 9,        weight: 0.25, color: "#fde047", labelColor: "#ca8a04" },
+  { label: "Moderate",        range: "10-14 cases", min: 10, max: 14,       weight: 0.44, color: "#fdba74", labelColor: "#ea580c" },
+  { label: "Moderate-High",   range: "15-19 cases", min: 15, max: 19,       weight: 0.62, color: "#fb923c", labelColor: "#c2410c" },
+  { label: "High",            range: "20-24 cases", min: 20, max: 24,       weight: 0.80, color: "#f87171", labelColor: "#b91c1c" },
+  { label: "Very High",       range: "25+ cases",   min: 25, max: Infinity, weight: 1.00, color: "#dc2626", labelColor: "#991b1b" },
 ];
 
-// Get weight/color based on prevalence percentage (not case count)
-function getWeight(prevalencePercent: number): number {
-  return TIERS.find((t) => prevalencePercent >= t.min && prevalencePercent <= t.max)?.weight ?? 0.06;
+function getWeight(caseCount: number): number {
+  return TIERS.find((t) => caseCount >= t.min && caseCount <= t.max)?.weight ?? 0.06;
 }
 
-function getLabelColor(prevalencePercent: number): string {
-  return TIERS.find((t) => prevalencePercent >= t.min && prevalencePercent <= t.max)?.labelColor ?? "#16a34a";
+function getLabelColor(caseCount: number): string {
+  return TIERS.find((t) => caseCount >= t.min && caseCount <= t.max)?.labelColor ?? "#16a34a";
 }
 
 // ─── IDW: Inverse Distance Weighting (no sqrt → uses power=2 for speed) ──────
@@ -120,7 +135,7 @@ function intensityToRGB(t: number): [number, number, number] {
 // ─── Popup HTML ───────────────────────────────────────────────────────────────
 function buildPopupHtml(props: BarangaySeverity) {
   const tier =
-    TIERS.find((t) => props.prevalence_rate >= t.min && props.prevalence_rate <= t.max) ?? TIERS[0];
+    TIERS.find((t) => props.malnutrition_count >= t.min && props.malnutrition_count <= t.max) ?? TIERS[0];
   return `
     <div style="padding:12px;min-width:230px;font-family:system-ui,-apple-system,sans-serif;line-height:1.5;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;border-bottom:1px solid #e2e8f0;padding-bottom:6px;">
@@ -140,6 +155,10 @@ function buildPopupHtml(props: BarangaySeverity) {
           <div style="display:flex;justify-content:space-between;margin-bottom:2px;"><span>🔴 Severe (SAM):</span><strong>${props.severe_count}</strong></div>
           <div style="display:flex;justify-content:space-between;"><span>🟠 Moderate (MAM):</span><strong>${props.moderate_count}</strong></div>
         </div>
+      </div>
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:11px;font-weight:600;color:#475569;">📍 Location</span>
+        <span style="font-size:11px;font-family:monospace;font-weight:600;color:#334155;">${formatCoordinate(props.lat)}°N, ${formatCoordinate(props.lng)}°E</span>
       </div>
     </div>`;
 }
@@ -163,7 +182,7 @@ function IDWCanvasLayer({ data }: { data: BarangaySeverity[] }) {
       .map((b) => {
         const lat = b.lat;
         const lng = b.lng;
-        return lat && lng ? { lat, lng, w: getWeight(b.prevalence_rate) } : null;  // Use prevalence_rate instead of malnutrition_count
+        return isValidCoordinate(lat, lng) ? { lat, lng, w: getWeight(b.malnutrition_count) } : null;
       })
       .filter(Boolean) as { lat: number; lng: number; w: number }[];
 
@@ -250,7 +269,7 @@ function IDWCanvasLayer({ data }: { data: BarangaySeverity[] }) {
       const lat = b.lat;
       const lng = b.lng;
       if (!lat || !lng) return;
-      const lc = getLabelColor(b.prevalence_rate);  // Use prevalence % instead of case count
+      const lc = getLabelColor(b.malnutrition_count);
       const short = b.name.replace(/^Poblacion\s+/, "Pob. ");
 
       const icon = L.divIcon({

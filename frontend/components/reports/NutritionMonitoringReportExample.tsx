@@ -136,8 +136,8 @@ export function NutritionMonitoringReportExample() {
       hotspots: [
         {
           name: 'Zone A - Northern Cluster',
-          latitude: 11.2833,
-          longitude: 123.2833,
+          latitude: 9.1250,
+          longitude: 125.5600,
           intensity: 92,
           caseCount: 125,
           radius: 2.5,
@@ -145,8 +145,8 @@ export function NutritionMonitoringReportExample() {
         },
         {
           name: 'Zone B - Central Area',
-          latitude: 11.27,
-          longitude: 123.28,
+          latitude: 9.1180,
+          longitude: 125.5650,
           intensity: 67,
           caseCount: 89,
           radius: 2.0,

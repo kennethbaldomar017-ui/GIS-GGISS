@@ -692,11 +692,11 @@ export default function SettingsPage() {
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Map Center Latitude</label>
-                        <input type="text" defaultValue="11.2833" className="admin-interactive-input w-full rounded-lg px-3 py-2 text-xs" />
+                        <input type="text" defaultValue="9.118" className="admin-interactive-input w-full rounded-lg px-3 py-2 text-xs" />
                       </div>
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Map Center Longitude</label>
-                        <input type="text" defaultValue="123.2833" className="admin-interactive-input w-full rounded-lg px-3 py-2 text-xs" />
+                        <input type="text" defaultValue="125.565" className="admin-interactive-input w-full rounded-lg px-3 py-2 text-xs" />
                       </div>
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Default Zoom Level</label>

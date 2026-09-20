@@ -11,7 +11,7 @@ export const CABADBARAN_BOUNDS: LatLngBoundsExpression = [
 ];
 
 // Barangays NOT part of Cabadbaran City — excluded from all map/heatmap displays
-export const EXCLUDED_BARANGAY_NAMES = new Set(["Concepcion"]);
+export const EXCLUDED_BARANGAY_NAMES = new Set<string>();
 
 export const CABADBARAN_MAP_OPTIONS = {
   center: CABADBARAN_CENTER,
@@ -20,6 +20,9 @@ export const CABADBARAN_MAP_OPTIONS = {
   minZoom: 12,
   zoom: 13,
   zoomControl: true,
+  zoomAnimation: false,
+  fadeAnimation: false,
+  markerZoomAnimation: false,
 };
 
 // ─── Mask — dark overlay that covers EVERYTHING outside the city ──────────────
@@ -47,8 +50,8 @@ export const TILE_LAYERS = {
     attribution: "&copy; OpenStreetMap contributors",
   },
   Streets: {
-    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri",
   },
   Terrain: {
     url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
@@ -59,12 +62,12 @@ export const TILE_LAYERS = {
     attribution: "Tiles &copy; Esri — Source: Esri, Maxar, GeoEye, Earthstar Geographics",
   },
   Dark: {
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri",
   },
   Light: {
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri",
   },
   Heatmap: {
     url: "", // Special layer - no static URL
@@ -74,47 +77,46 @@ export const TILE_LAYERS = {
 
 // ─── Street Labels Overlay (for Satellite + Streets hybrid) ──────────────────
 export const STREET_LABELS_OVERLAY = {
-  url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png",
-  attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+  url: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+  attribution: "Labels &copy; Esri",
 };
 
 export type TileLayerKey = keyof typeof TILE_LAYERS;
 
-// ─── Real Barangay Coordinates (OSM-verified WGS84) ─────────────────────────
-// Poblacion 1-12 are clustered around the city center; spread slightly to avoid overlap
+// ─── Authoritative Barangay Coordinates (WGS84) ──────────────────────────────
+// Supplied barangay coordinates used for icon placement and fallback geometry.
 export const BARANGAY_COORDS: Record<string, [number, number]> = {
-  "Antonio Luna": [9.0827,  125.5918],
-  "Bay-ang":      [9.1033,  125.5779],
-  "Bayabas":      [9.1451,  125.5940],
-  "Caasinan":     [9.1365,  125.5233],
-  "Cabinet":      [9.1269,  125.5268],
-  "Calamba":      [9.0974,  125.6062],
-  "Calibunan":    [9.1062,  125.5307],
-  "Comagascas":   [9.1357,  125.5599],
-  // Concepcion is NOT part of Cabadbaran City — intentionally excluded
-  "Del Pilar":    [9.1527,  125.5827],
-  "Katugasan":    [9.1316,  125.5875],
-  "Kauswagan":    [9.1304,  125.5334],
-  "La Union":     [9.0845,  125.5364],
-  "Mabini":       [9.1141,  125.5517],
-  "Mahaba":       [9.1032,  125.6315],
-  // Poblacion cluster — spread in a 4×3 grid around city center (~9.125, 125.535)
-  "Poblacion 1":  [9.1270,  125.5310],
-  "Poblacion 2":  [9.1270,  125.5340],
-  "Poblacion 3":  [9.1270,  125.5370],
-  "Poblacion 4":  [9.1240,  125.5310],
-  "Poblacion 5":  [9.1240,  125.5340],
-  "Poblacion 6":  [9.1240,  125.5370],
-  "Poblacion 7":  [9.1210,  125.5310],
-  "Poblacion 8":  [9.1210,  125.5340],
-  "Poblacion 9":  [9.1210,  125.5370],
-  "Poblacion 10": [9.1180,  125.5310],
-  "Poblacion 11": [9.1180,  125.5340],
-  "Poblacion 12": [9.1180,  125.5370],
-  "Puting Bato":  [9.1260,  125.6362],
-  "Sanghan":      [9.0868,  125.5724],
-  "Soriano":      [9.0984,  125.5645],
-  "Tolosa":       [9.1199,  125.5261],
+  "Antonio Luna": [9.0827,  125.5911],
+  "Bay-ang":      [9.1041,  125.5773],
+  "Bayabas":      [9.1455,  125.5937],
+  "Caasinan":     [9.1362,  125.5236],
+  "Cabinet":      [9.1245,  125.5268],
+  "Calamba":      [9.0985,  125.6006],
+  "Calibunan":    [9.1057,  125.5338],
+  "Comagascas":   [9.1350,  125.5587],
+  "Concepcion":   [9.1807,  125.5822],
+  "Del Pilar":    [9.1513,  125.5840],
+  "Katugasan":    [9.1313,  125.5837],
+  "Kauswagan":    [9.1299,  125.5309],
+  "La Union":     [9.0986,  125.5518],
+  "Mabini":       [9.1129,  125.5523],
+  "Mahaba":       [9.1171,  125.6329],
+  "Poblacion 1":  [9.1232,  125.5330],
+  "Poblacion 2":  [9.1238,  125.5337],
+  "Poblacion 3":  [9.1233,  125.5297],
+  "Poblacion 4":  [9.1194,  125.5325],
+  "Poblacion 5":  [9.1189,  125.5338],
+  "Poblacion 6":  [9.1206,  125.5339],
+  "Poblacion 7":  [9.1250,  125.5373],
+  "Poblacion 8":  [9.1229,  125.5361],
+  "Poblacion 9":  [9.1227,  125.5420],
+  "Poblacion 10": [9.1206,  125.5367],
+  "Poblacion 11": [9.1182,  125.5354],
+  "Poblacion 12": [9.1178,  125.5410],
+  "Puting Bato":  [9.1263,  125.6368],
+  "Sanghan":      [9.0878,  125.5709],
+  "Soriano":      [9.0967,  125.5684],
+  "Tolosa":       [9.1175,  125.5255],
 };
 
 // ─── Polygon builder: small square around each barangay center ───────────────

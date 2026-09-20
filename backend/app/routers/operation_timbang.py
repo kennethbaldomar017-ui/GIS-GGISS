@@ -1668,9 +1668,9 @@ async def export_opt_plus_excel(
         headers = [
             ("Sequence", 1, 3),
             ("Barangay", 1, 3),
-            ("No. of Children w/ Valid WFA", 1, 3),
-            ("No. of Children w/ Valid HFA", 1, 3),
-            ("No. of Children w/ Valid WFL/H", 1, 3),
+            ("No. of Children w/ Valid Weight-for-Age (WFA)", 1, 3),
+            ("No. of Children w/ Valid Height-for-Age (HFA)", 1, 3),
+            ("No. of Children w/ Valid Weight-for-Length/Height (WFL/H)", 1, 3),
             ("Barangay Population", 1, 3),
         ]
         

@@ -43,8 +43,8 @@ export function GISHotspotAnalysis({ data }: { data?: GISHotspotAnalysisData }) 
   const hotspots = data.hotspots || [
     {
       name: 'Zone A - Northern Cluster',
-      latitude: 11.2833,
-      longitude: 123.2833,
+      latitude: 9.1250,
+      longitude: 125.5600,
       intensity: 92,
       caseCount: 125,
       radius: 2.5,
@@ -52,8 +52,8 @@ export function GISHotspotAnalysis({ data }: { data?: GISHotspotAnalysisData }) 
     },
     {
       name: 'Zone B - Central Area',
-      latitude: 11.2700,
-      longitude: 123.2800,
+      latitude: 9.1180,
+      longitude: 125.5650,
       intensity: 67,
       caseCount: 89,
       radius: 2.0,
@@ -61,8 +61,8 @@ export function GISHotspotAnalysis({ data }: { data?: GISHotspotAnalysisData }) 
     },
     {
       name: 'Zone C - Eastern Sector',
-      latitude: 11.2600,
-      longitude: 123.3000,
+      latitude: 9.1150,
+      longitude: 125.5800,
       intensity: 54,
       caseCount: 72,
       radius: 1.8,
@@ -70,8 +70,8 @@ export function GISHotspotAnalysis({ data }: { data?: GISHotspotAnalysisData }) 
     },
     {
       name: 'Zone D - Southern Region',
-      latitude: 11.2500,
-      longitude: 123.2700,
+      latitude: 9.1080,
+      longitude: 125.5700,
       intensity: 43,
       caseCount: 58,
       radius: 1.5,
