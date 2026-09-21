@@ -341,7 +341,7 @@ async def compliance(
     # NOTE: Using ALL measurement records to match OPT+ tally
     barangays = (await db.scalars(select(Barangay).order_by(Barangay.name))).all()
     res = []
-    for b in barangays:
+    for rank, b in enumerate(barangays, start=1):
         # 1. Reports Submitted (percentage of reports submitted vs total)
         total_reports = await db.scalar(select(func.count(Report.id)).where(Report.barangay_id == b.id)) or 0
         submitted_reports = await db.scalar(select(func.count(Report.id)).where(Report.barangay_id == b.id).where(Report.status.in_(["submitted", "approved"]))) or 0
@@ -379,7 +379,15 @@ async def compliance(
         hash_val = sum(ord(c) for c in b.name) % 15
         total_compliance = round(min(100.0, max(50.0, total_compliance + hash_val - 7)), 1)
         
+        status = "compliant" if total_compliance >= 85 else "needs_attention" if total_compliance >= 65 else "non_compliant"
         res.append({
+            "rank": rank,
+            "name": b.name,
+            "report_compliance": round(report_score, 1),
+            "program_compliance": round(program_score, 1),
+            "assessment_compliance": round(assessments_score, 1),
+            "overall_compliance": total_compliance,
+            "status": status,
             "barangay_id": str(b.id),
             "barangay": b.name,
             "report_submission": f"{round(report_score, 1)}%",
@@ -1325,6 +1333,7 @@ async def superadmin_programs_overview(
             ProgramSession.session_date >= today,
             ProgramSession.session_date <= next_30_days
         )
+        .options(selectinload(ProgramSession.purok))
     )).all()
     
     # Aggregate by barangay
@@ -1536,40 +1545,40 @@ async def superadmin_ai_insights(
     barangays = result.scalars().all()
     logger.info(f"Found {len(barangays)} barangays (all included)")
     
-    # Get all measurements filtered by year
-    from datetime import datetime
-    start_date = datetime(year, 1, 1).date()
-    end_date = datetime(year, 12, 31).date()
-    
-    measurements_stmt = (
-        select(Measurement)
-        .options(selectinload(Measurement.child).selectinload(Child.barangay))
-        .where(Measurement.measurement_date.between(start_date, end_date))
-    )
-    result = await db.execute(measurements_stmt)
-    all_measurements = result.scalars().all()
-    logger.info(f"Found {len(all_measurements)} measurements in database for year {year}")
+    # Use one latest, age-appropriate measurement per active child so repeated
+    # monitoring visits do not inflate city or barangay prevalence.
+    all_measurements = await latest_measurements(db, None, year)
+    previous_measurements = await latest_measurements(db, None, year - 1)
+    logger.info(f"Found {len(all_measurements)} latest child measurements for year {year}")
     
     # Calculate city-wide statistics
-    # NOTE: Using total measurement records (ALL) not unique children count, to match dashboard tally
-    city_total_children = len(all_measurements)  # Total measurement records = 151 (matching dashboard)
-    unique_children_count = len(set(m.child_id for m in all_measurements))  # Unique children = 51 (for reference)
-    logger.info(f"Total measurement records: {city_total_children}")
-    logger.info(f"Unique children: {unique_children_count}")
+    city_total_children = len({m.child_id for m in all_measurements})
     city_normal = sum(1 for m in all_measurements if m.overall_status.value == "normal")
     city_sam = sum(1 for m in all_measurements if m.overall_status.value == "severe_acute_malnutrition")
     city_mam = sum(1 for m in all_measurements if m.overall_status.value == "moderate_acute_malnutrition")
     city_malnutrition_cases = city_sam + city_mam
     city_malnutrition_rate = round((city_malnutrition_cases / max(len(all_measurements), 1)) * 100, 1) if all_measurements else 0
     
-    # Calculate prevalence rates
-    city_wasting_rate = 0
-    city_stunting_rate = 0
-    city_underweight_rate = 0
-    if all_measurements:
-        city_wasting_rate = round(sum(1 for m in all_measurements if m.whz and m.whz < -1) / len(all_measurements) * 100, 1)
-        city_stunting_rate = round(sum(1 for m in all_measurements if m.haz and m.haz < -1) / len(all_measurements) * 100, 1)
-        city_underweight_rate = round(sum(1 for m in all_measurements if m.waz and m.waz < -1) / len(all_measurements) * 100, 1)
+    city_prevalence = calculate_prevalence(all_measurements)
+    city_wasting_rate = city_prevalence["wasting_rate"]
+    city_stunting_rate = city_prevalence["stunting_rate"]
+    city_underweight_rate = city_prevalence["underweight_rate"]
+    previous_malnutrition_cases = sum(
+        1 for m in previous_measurements
+        if m.overall_status.value in ["severe_acute_malnutrition", "moderate_acute_malnutrition"]
+    )
+    previous_malnutrition_rate = round(
+        previous_malnutrition_cases / len(previous_measurements) * 100, 1
+    ) if previous_measurements else None
+    rate_change = round(city_malnutrition_rate - previous_malnutrition_rate, 1) if previous_malnutrition_rate is not None else None
+    if not all_measurements:
+        confidence_level = "insufficient"
+    elif len(all_measurements) >= 100:
+        confidence_level = "high"
+    elif len(all_measurements) >= 30:
+        confidence_level = "moderate"
+    else:
+        confidence_level = "limited"
     
     # Calculate at-risk children (any form of malnutrition)
     city_at_risk = sum(1 for m in all_measurements if m.overall_status.value in ["severe_acute_malnutrition", "moderate_acute_malnutrition"])
@@ -1688,9 +1697,35 @@ async def superadmin_ai_insights(
             "expected_impact": "Sustain current positive trends"
         })
     
+    if rate_change is None:
+        trend_summary = f"No prior-year comparison is available for {year}."
+    elif rate_change < 0:
+        trend_summary = f"Malnutrition improved by {abs(rate_change):.1f} percentage points compared with {year - 1}."
+    elif rate_change > 0:
+        trend_summary = f"Malnutrition increased by {rate_change:.1f} percentage points compared with {year - 1}."
+    else:
+        trend_summary = f"Malnutrition was unchanged compared with {year - 1}."
+
+    if not all_measurements:
+        forecast_outlook = "Insufficient current-year measurements to estimate a trend."
+    elif overall_risk_level in {"critical", "high"} and rate_change is not None and rate_change > 0:
+        forecast_outlook = f"Priority outlook: risk is high and the rate is worsening; intensify monitoring and referral follow-up."
+    elif overall_risk_level in {"critical", "high"}:
+        forecast_outlook = "Priority outlook: risk remains high; maintain intensified monitoring and referral follow-up."
+    else:
+        forecast_outlook = f"Current outlook is based on {city_total_children} latest child measurements; continue monitoring for changes."
+
+    if city_sam > 0:
+        strategic_recommendations = "Prioritize SAM referral completion, then target supplementary feeding in the highest-risk barangays."
+    elif rate_change is not None and rate_change > 0:
+        strategic_recommendations = "Prioritize barangays with worsening rates for case review, repeat screening, and targeted feeding support."
+    else:
+        strategic_recommendations = "Maintain routine monitoring and direct additional support to barangays with the highest current rates."
+
     response_data = {
         "city_summary": {
             "total_children": city_total_children,
+            "unique_barangays": len({m.child.barangay_id for m in all_measurements if m.child}),
             "total_at_risk": city_at_risk,
             "critical_cases": city_sam,
             "high_risk_cases": city_high_risk,
@@ -1699,14 +1734,19 @@ async def superadmin_ai_insights(
             "city_stunting_rate": city_stunting_rate,
             "city_underweight_rate": city_underweight_rate,
             "overall_risk_level": overall_risk_level,
-            "overall_risk_score": overall_risk_score
+            "overall_risk_score": overall_risk_score,
+            "previous_year": year - 1,
+            "previous_malnutrition_rate": previous_malnutrition_rate,
+            "malnutrition_rate_change": rate_change,
+            "confidence_level": confidence_level,
+            "sample_size": len(all_measurements)
         },
         "barangay_rankings": barangay_rankings,
         "critical_barangays": critical_barangays[:5],  # Top 5 critical
         "recommended_city_interventions": recommended_city_interventions,
         "ai_interpretation": {
-            "city_trend_analysis": f"City-wide malnutrition rate at {city_malnutrition_rate}% with {city_sam} critical SAM cases",
-            "forecast_outlook": "Trend stabilizing with improved monitoring coverage",
+            "city_trend_analysis": f"City-wide malnutrition rate is {city_malnutrition_rate}% with {city_sam} critical SAM cases. {trend_summary}",
+            "forecast_outlook": forecast_outlook,
             "critical_city_alerts": [
                 alert for alert in [
                     f"{city_sam} SAM cases requiring immediate referral" if city_sam > 0 else None,
@@ -1716,9 +1756,9 @@ async def superadmin_ai_insights(
             ],
             "positive_indicators": [
                 f"{city_normal} children with normal nutritional status",
-                "Consistent monitoring across all barangays"
+                f"Analysis is based on {city_total_children} latest child measurements"
             ],
-            "strategic_recommendations": "Focus on SAM referral system strengthening and targeted RUTF distribution"
+            "strategic_recommendations": strategic_recommendations
         }
     }
     logger.info(f"Returning AI Insights response with {len(barangay_rankings)} barangays and {len(recommended_city_interventions)} interventions")

@@ -72,7 +72,7 @@ export function SuperAdminProgramsOverview({ data, isLoading }: { data?: Program
           <Calendar className="h-5 w-5 text-indigo-600" />
           City-Wide Nutrition Program Overview
         </h2>
-        <Link href="/nutrition-programs" className="text-xs font-bold text-indigo-650 hover:underline">
+        <Link href="/nutrition" className="text-xs font-bold text-indigo-650 hover:underline">
           View All Programs
         </Link>
       </div>

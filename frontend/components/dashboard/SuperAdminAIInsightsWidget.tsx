@@ -38,6 +38,7 @@ interface AIInterpretation {
 interface SuperAdminAIInsightsData {
   city_summary: {
     total_children: number;
+    unique_barangays: number;
     total_at_risk: number;
     critical_cases: number;
     high_risk_cases: number;
@@ -47,6 +48,11 @@ interface SuperAdminAIInsightsData {
     city_underweight_rate: number;
     overall_risk_level: string;
     overall_risk_score: number;
+    previous_year: number;
+    previous_malnutrition_rate: number | null;
+    malnutrition_rate_change: number | null;
+    confidence_level: "high" | "moderate" | "limited" | "insufficient";
+    sample_size: number;
   };
   barangay_rankings: BarangayRanking[];
   critical_barangays: CriticalBarangay[];
@@ -108,6 +114,10 @@ export function SuperAdminAIInsightsWidget({
   }
 
   const summary = data.city_summary;
+  const trendChange = summary.malnutrition_rate_change;
+  const confidenceLabel = summary.confidence_level === "insufficient"
+    ? "Insufficient data"
+    : `${summary.confidence_level[0].toUpperCase()}${summary.confidence_level.slice(1)} confidence`;
   const colorForRisk = (level: string) => {
     switch (level.toLowerCase()) {
       case "critical":
@@ -146,19 +156,19 @@ export function SuperAdminAIInsightsWidget({
         </div>
 
         {/* Quick Stats */}
-        <div className="grid grid-cols-5 gap-3 mt-4 pt-4 border-t border-emerald-200">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mt-4 pt-4 border-t border-emerald-200">
           <div className="bg-white/60 rounded-lg p-3">
             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Total Children</p>
             <p className="text-2xl font-black text-emerald-700">{summary.total_children}</p>
           </div>
           <div className="bg-white/60 rounded-lg p-3">
             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Unique Barangays</p>
-            <p className="text-2xl font-black text-blue-700">10</p>
+            <p className="text-2xl font-black text-blue-700">{summary.unique_barangays}</p>
             <p className="text-[9px] text-blue-600 mt-1">Coverage areas</p>
           </div>
           <div className="bg-white/60 rounded-lg p-3">
             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Malnutrition Rate</p>
-            <p className="text-2xl font-black text-red-600">15.2%</p>
+            <p className="text-2xl font-black text-red-600">{summary.city_malnutrition_rate}%</p>
             <p className="text-[9px] text-red-600 mt-1">City average</p>
           </div>
           <div className="bg-white/60 rounded-lg p-3">
@@ -169,6 +179,18 @@ export function SuperAdminAIInsightsWidget({
           <div className="bg-white/60 rounded-lg p-3">
             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">At-Risk</p>
             <p className="text-2xl font-black text-orange-600">{summary.total_at_risk}</p>
+          </div>
+          <div className="bg-white/60 rounded-lg p-3">
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Year Change</p>
+            <p className={`text-lg font-black ${trendChange === null ? "text-slate-500" : trendChange > 0 ? "text-red-600" : "text-emerald-600"}`}>
+              {trendChange === null ? "N/A" : `${trendChange > 0 ? "+" : ""}${trendChange.toFixed(1)} pp`}
+            </p>
+            <p className="text-[9px] text-slate-500 mt-1">vs {summary.previous_year}</p>
+          </div>
+          <div className="bg-white/60 rounded-lg p-3">
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Evidence</p>
+            <p className="text-lg font-black text-slate-700">{confidenceLabel}</p>
+            <p className="text-[9px] text-slate-500 mt-1">n={summary.sample_size}</p>
           </div>
         </div>
       </div>
