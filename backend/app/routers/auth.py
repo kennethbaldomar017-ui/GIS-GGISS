@@ -3,11 +3,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from jose import JWTError
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import get_settings
 from ..database import get_db
-from ..middleware.rbac import bearer, get_current_user
+from ..middleware.rbac import bearer, get_current_user, verify_superadmin_password
 from ..models import Barangay, User, ActivityLog
 from ..models.entities import ActivityLogType
 from ..schemas.common import LoginRequest, TokenResponse, UserRead
@@ -98,6 +99,24 @@ async def logout(request: Request, user: User = Depends(get_current_user), db: A
     db.add(log)
     await db.commit()
     return {"ok": True}
+
+
+class VerifyPasswordIn(BaseModel):
+    password: str
+
+
+@router.post("/verify-password")
+async def verify_password_endpoint(
+    body: VerifyPasswordIn,
+    user: User = Depends(get_current_user),
+):
+    """Step-up re-auth check used by the frontend password-gate modal.
+
+    Only reports on the caller's own password, so it leaks nothing.
+    Returns 403 INVALID_PASSWORD on mismatch (never 401 — see
+    middleware.rbac.verify_superadmin_password for why)."""
+    await verify_superadmin_password(body.password, user)
+    return {"ok": True, "username": user.username}
 
 
 @router.get("/me")

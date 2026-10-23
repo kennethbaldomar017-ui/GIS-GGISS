@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict
 
 
 class ORMModel(BaseModel):
@@ -22,16 +22,17 @@ class LoginRequest(BaseModel):
 
 class UserCreate(BaseModel):
     username: str
-    email: EmailStr
+    email: str
     password: str
     role: str = "admin"
     barangay_id: UUID | None = None
+    current_password: str
 
 
 class UserRead(ORMModel):
     id: UUID
     username: str
-    email: EmailStr
+    email: str
     role: str
     barangay_id: UUID | None
     barangay_name: str | None = None

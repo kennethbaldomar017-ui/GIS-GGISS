@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select, extract
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from ..database import get_db
 from ..middleware.rbac import get_current_user
 from ..models import CalendarEvent, CalendarEventType, User
@@ -28,10 +29,18 @@ def _event_out(e: CalendarEvent) -> dict:
 
 @router.get("")
 async def list_events(month: int, year: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    stmt = select(CalendarEvent).where(
-        extract("month", CalendarEvent.event_date) == month,
-        extract("year", CalendarEvent.event_date) == year,
-    ).order_by(CalendarEvent.event_date)
+    stmt = (
+        select(CalendarEvent)
+        .where(
+            extract("month", CalendarEvent.event_date) == month,
+            extract("year", CalendarEvent.event_date) == year,
+        )
+        .options(
+            selectinload(CalendarEvent.purok),
+            selectinload(CalendarEvent.assigned_user),
+        )
+        .order_by(CalendarEvent.event_date)
+    )
     rows = list((await db.scalars(stmt)).all())
     return [_event_out(r) for r in rows]
 

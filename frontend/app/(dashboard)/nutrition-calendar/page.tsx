@@ -44,18 +44,104 @@ export default function NutritionCalendarPage() {
   const [showForm, setShowForm] = useState(false);
   const [typeFilter, setTypeFilter] = useState<string>("all");
 
+  // Add-event form state (inputs are controlled — previously they were
+  // unbound, so submitted values were never captured).
+  const emptyEventForm = {
+    event_type: "weighing",
+    title: "",
+    event_date: "",
+    time: "",
+    location: "",
+    purok_id: "",
+    assigned_to: "",
+    description: "",
+    send_reminder: false,
+  };
+  const [eventForm, setEventForm] = useState(emptyEventForm);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Date.getMonth() is 0-indexed but SQL EXTRACT('month') is 1-indexed,
+  // so the API must be sent getMonth() + 1 or events fall one month short.
+  const queryMonth = currentDate.getMonth() + 1;
+
   const { data: events, isLoading } = useQuery({
-    queryKey: ["calendar-events", currentDate.getMonth(), currentDate.getFullYear()],
-    queryFn: () => 
-      api.get(`/api/calendar?month=${currentDate.getMonth()}&year=${currentDate.getFullYear()}`).then((r) => r.data),
+    queryKey: ["calendar-events", queryMonth, currentDate.getFullYear()],
+    queryFn: () =>
+      api.get(`/api/calendar?month=${queryMonth}&year=${currentDate.getFullYear()}`).then((r) => r.data),
+  });
+
+  // Loaded only while the add-event modal is open.
+  const puroksQuery = useQuery({
+    queryKey: ["calendar-puroks", user?.role, user?.barangay_id],
+    queryFn: () =>
+      api
+        .get(
+          user?.role === "admin" && user?.barangay_id
+            ? `/api/puroks?barangay_id=${user.barangay_id}`
+            : "/api/puroks"
+        )
+        .then((r) => r.data),
+    enabled: showForm,
+  });
+
+  const usersQuery = useQuery({
+    queryKey: ["calendar-users"],
+    queryFn: () => api.get("/api/users").then((r) => r.data),
+    enabled: showForm,
+  });
+
+  const createEventMutation = useMutation({
+    mutationFn: (payload: any) => api.post("/api/calendar", payload),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
+      setEventForm(emptyEventForm);
+      setFormError(null);
+      setShowForm(false);
+      setSuccessMsg(`"${vars.title}" was added to the calendar`);
+      // Jump to the event's own month so it is visible immediately.
+      const [y, m] = String(vars.event_date).split("-").map(Number);
+      setCurrentDate(new Date(y, m - 1, 1));
+      setTimeout(() => setSuccessMsg(null), 4000);
+    },
+    onError: (err: any) => {
+      const status = err?.response?.status;
+      setFormError(
+        status === 401
+          ? "Session expired — please log in again."
+          : status === 422
+          ? "Some fields are missing or invalid."
+          : "Could not save the event. Please try again."
+      );
+    },
   });
 
   const deleteEventMutation = useMutation({
-    mutationFn: (eventId: number) => api.delete(`/api/calendar/${eventId}`),
+    mutationFn: (eventId: string) => api.delete(`/api/calendar/${eventId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
     },
   });
+
+  function submitEvent(e: React.FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+    if (!eventForm.title.trim() || !eventForm.event_date || !eventForm.time || !eventForm.location.trim()) {
+      setFormError("Title, date, time and location are required.");
+      return;
+    }
+    createEventMutation.mutate({
+      title: eventForm.title.trim(),
+      event_type: eventForm.event_type,
+      event_date: eventForm.event_date,
+      time: eventForm.time,
+      location: eventForm.location.trim(),
+      purok_id: eventForm.purok_id || null,
+      assigned_to: eventForm.assigned_to || null,
+      description: eventForm.description.trim() || null,
+      send_reminder: eventForm.send_reminder,
+    });
+  }
 
   const getDaysInMonth = (date: Date) => {
     const year = date.getFullYear();
@@ -135,13 +221,22 @@ export default function NutritionCalendarPage() {
           <p className="text-sm">Schedule and manage nutrition activities</p>
         </div>
         <button
-          onClick={() => setShowForm(true)}
+          onClick={() => {
+            setFormError(null);
+            setShowForm(true);
+          }}
           className="admin-action-btn-emerald flex items-center gap-2 px-4 py-2.5 text-xs text-white"
         >
           <Plus className="h-4 w-4" />
           Add Event
         </button>
       </div>
+
+      {successMsg && (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-700" role="status">
+          {successMsg}
+        </div>
+      )}
 
       {/* Calendar Navigation */}
       <div className="admin-glass-panel p-4">
@@ -273,7 +368,7 @@ export default function NutritionCalendarPage() {
                           <Edit className="h-4 w-4" />
                         </button>
                         <button
-                          onClick={() => deleteEventMutation.mutate(Number(event.id))}
+                          onClick={() => deleteEventMutation.mutate(event.id)}
                           className="text-slate-400 hover:text-red-600"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -378,7 +473,7 @@ export default function NutritionCalendarPage() {
                   Edit Event
                 </button>
                 <button
-                  onClick={() => deleteEventMutation.mutate(Number(selectedEvent.id))}
+                  onClick={() => deleteEventMutation.mutate(selectedEvent.id)}
                   className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700"
                 >
                   Delete Event
@@ -402,10 +497,14 @@ export default function NutritionCalendarPage() {
                 ✕
               </button>
             </div>
-            <form className="p-6 space-y-4">
+            <form onSubmit={submitEvent} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Event Type</label>
-                <select className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <select
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={eventForm.event_type}
+                  onChange={(e) => setEventForm({ ...eventForm, event_type: e.target.value })}
+                >
                   <option value="weighing">Weighing Day</option>
                   <option value="feeding">Feeding Program</option>
                   <option value="home_visit">Home Visit</option>
@@ -414,46 +513,110 @@ export default function NutritionCalendarPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Title</label>
-                <input type="text" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Event title..." />
+                <input
+                  type="text"
+                  required
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Event title..."
+                  value={eventForm.title}
+                  onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
-                  <input type="date" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input
+                    type="date"
+                    required
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={eventForm.event_date}
+                    onChange={(e) => setEventForm({ ...eventForm, event_date: e.target.value })}
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Time</label>
-                  <input type="time" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input
+                    type="time"
+                    required
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={eventForm.time}
+                    onChange={(e) => setEventForm({ ...eventForm, time: e.target.value })}
+                  />
                 </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Location</label>
-                <input type="text" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Location..." />
+                <input
+                  type="text"
+                  required
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Location..."
+                  value={eventForm.location}
+                  onChange={(e) => setEventForm({ ...eventForm, location: e.target.value })}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Purok (Optional)</label>
-                <select className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <select
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={eventForm.purok_id}
+                  onChange={(e) => setEventForm({ ...eventForm, purok_id: e.target.value })}
+                >
                   <option value="">Select purok...</option>
-                  <option value="Purok 1">Purok 1</option>
-                  <option value="Purok 2">Purok 2</option>
-                  <option value="Purok 3">Purok 3</option>
-                  <option value="Purok 4">Purok 4</option>
+                  {(puroksQuery.data || []).map((p: any) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {p.barangay_name ? ` — ${p.barangay_name}` : ""}
+                    </option>
+                  ))}
                 </select>
+                {puroksQuery.isLoading && (
+                  <p className="text-xs text-slate-400 mt-1">Loading puroks...</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Assign To (Optional)</label>
-                <select className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="">Select BNS...</option>
+                <select
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={eventForm.assigned_to}
+                  onChange={(e) => setEventForm({ ...eventForm, assigned_to: e.target.value })}
+                >
+                  <option value="">Select user...</option>
+                  {(usersQuery.data || []).map((u: any) => (
+                    <option key={u.id} value={u.id}>
+                      {u.username}
+                    </option>
+                  ))}
                 </select>
+                {usersQuery.isLoading && <p className="text-xs text-slate-400 mt-1">Loading users...</p>}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                <textarea rows={3} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Event details..." />
+                <textarea
+                  rows={3}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Event details..."
+                  value={eventForm.description}
+                  onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })}
+                />
               </div>
               <div className="flex items-center gap-2">
-                <input type="checkbox" id="reminder" className="rounded border-slate-300" />
+                <input
+                  type="checkbox"
+                  id="reminder"
+                  className="rounded border-slate-300"
+                  checked={eventForm.send_reminder}
+                  onChange={(e) => setEventForm({ ...eventForm, send_reminder: e.target.checked })}
+                />
                 <label htmlFor="reminder" className="text-sm text-slate-700">Send reminder notification</label>
               </div>
+
+              {formError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600" role="alert">
+                  {formError}
+                </div>
+              )}
+
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
@@ -462,8 +625,15 @@ export default function NutritionCalendarPage() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
-                  Add Event
+                <button
+                  type="submit"
+                  disabled={createEventMutation.isPending}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+                >
+                  {createEventMutation.isPending && (
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  )}
+                  {createEventMutation.isPending ? "Saving..." : "Add Event"}
                 </button>
               </div>
             </form>

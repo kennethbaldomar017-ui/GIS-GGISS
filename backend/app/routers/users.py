@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
-from ..middleware.rbac import require_super_admin, get_current_user
+from ..middleware.rbac import require_super_admin, get_current_user, verify_superadmin_password
 from ..models import User, Barangay
 from ..models.entities import UserRole, AccountStatus
 from ..schemas.common import UserCreate, UserRead
@@ -12,6 +12,51 @@ from ..utils.security import hash_password
 from ..services.websocket import manager
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+async def assert_barangay_slot_free(
+    db: AsyncSession,
+    barangay_id: UUID | None,
+    exclude_user_id: UUID | None = None,
+) -> None:
+    """One active admin per barangay.
+
+    Raises 409 BARANGAY_HAS_ADMIN if another active admin is already
+    assigned to this barangay. Deactivated admins free the slot.
+
+    Checks by barangay_id only, so barangays excluded from the public
+    list (e.g. Concepcion) are still enforced.
+    """
+    if not barangay_id:
+        return
+    stmt = select(User).where(
+        User.role == UserRole.admin,
+        User.barangay_id == barangay_id,
+        User.is_active.is_(True),
+    )
+    if exclude_user_id:
+        stmt = stmt.where(User.id != exclude_user_id)
+    if await db.scalar(stmt):
+        raise HTTPException(status_code=409, detail="BARANGAY_HAS_ADMIN")
+
+
+async def assert_super_admin_slot_free(
+    db: AsyncSession,
+    exclude_user_id: UUID | None = None,
+) -> None:
+    """Only one active super_admin may exist.
+
+    Raises 409 SUPER_ADMIN_EXISTS when another active super_admin is
+    already registered. Deactivating that account frees the slot.
+    """
+    stmt = select(User).where(
+        User.role == UserRole.super_admin,
+        User.is_active.is_(True),
+    )
+    if exclude_user_id:
+        stmt = stmt.where(User.id != exclude_user_id)
+    if await db.scalar(stmt):
+        raise HTTPException(status_code=409, detail="SUPER_ADMIN_EXISTS")
 
 
 @router.get("")
@@ -48,7 +93,12 @@ async def list_users(db: AsyncSession = Depends(get_db), user: User = Depends(ge
 
 
 @router.post("", response_model=UserRead)
-async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
+async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_super_admin)):
+    await verify_superadmin_password(body.current_password, actor)
+    if body.role == UserRole.admin.value:
+        await assert_barangay_slot_free(db, body.barangay_id)
+    elif body.role == UserRole.super_admin.value:
+        await assert_super_admin_slot_free(db)
     user = User(username=body.username, email=body.email, password_hash=hash_password(body.password), role=UserRole(body.role), barangay_id=body.barangay_id)
     db.add(user)
     await db.commit()
@@ -66,10 +116,15 @@ async def get_user(user_id: UUID, db: AsyncSession = Depends(get_db), _=Depends(
 
 
 @router.put("/{user_id}", response_model=UserRead)
-async def update_user(user_id: UUID, body: UserCreate, db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
+async def update_user(user_id: UUID, body: UserCreate, db: AsyncSession = Depends(get_db), actor: User = Depends(require_super_admin)):
+    await verify_superadmin_password(body.current_password, actor)
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(404, "User not found")
+    if body.role == UserRole.admin.value:
+        await assert_barangay_slot_free(db, body.barangay_id, exclude_user_id=user_id)
+    elif body.role == UserRole.super_admin.value:
+        await assert_super_admin_slot_free(db, exclude_user_id=user_id)
     user.username, user.email, user.role, user.barangay_id = body.username, body.email, UserRole(body.role), body.barangay_id
     if body.password:
         user.password_hash = hash_password(body.password)
@@ -79,8 +134,13 @@ async def update_user(user_id: UUID, body: UserCreate, db: AsyncSession = Depend
     return user
 
 
+class DeleteUserIn(BaseModel):
+    current_password: str
+
+
 @router.delete("/{user_id}")
-async def delete_user(user_id: UUID, db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
+async def delete_user(user_id: UUID, body: DeleteUserIn, db: AsyncSession = Depends(get_db), actor: User = Depends(require_super_admin)):
+    await verify_superadmin_password(body.current_password, actor)
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(404, "User not found")
@@ -90,11 +150,18 @@ async def delete_user(user_id: UUID, db: AsyncSession = Depends(get_db), _=Depen
     return {"ok": True}
 
 
+class ResetPasswordIn(BaseModel):
+    current_password: str
+    new_password: str | None = None
+
+
 @router.post("/{user_id}/reset-password")
-async def reset_password(user_id: UUID, password: str = "Admin@123", db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
+async def reset_password(user_id: UUID, body: ResetPasswordIn, db: AsyncSession = Depends(get_db), actor: User = Depends(require_super_admin)):
+    await verify_superadmin_password(body.current_password, actor)
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(404, "User not found")
+    password = body.new_password or "Admin@123"
     user.password_hash = hash_password(password)
     await db.commit()
     await manager.broadcast("refetch_data")
@@ -103,10 +170,12 @@ async def reset_password(user_id: UUID, password: str = "Admin@123", db: AsyncSe
 
 class AccountStatusIn(BaseModel):
     account_status: str
+    current_password: str
 
 
 @router.patch("/{user_id}/account-status", response_model=UserRead)
-async def update_account_status(user_id: UUID, body: AccountStatusIn, db: AsyncSession = Depends(get_db), _=Depends(require_super_admin)):
+async def update_account_status(user_id: UUID, body: AccountStatusIn, db: AsyncSession = Depends(get_db), actor: User = Depends(require_super_admin)):
+    await verify_superadmin_password(body.current_password, actor)
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(404, "User not found")

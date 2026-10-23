@@ -18,6 +18,13 @@ import {
   Unlock
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth";
+import PasswordConfirmModal from "@/components/admin/PasswordConfirmModal";
+
+type GateAction = "create" | "edit" | "reset" | "lock" | "unlock" | "delete";
+
+function isInvalidPassword(err: any): boolean {
+  return err?.response?.status === 403 && err?.response?.data?.detail === "INVALID_PASSWORD";
+}
 
 export default function UsersPage() {
   const router = useRouter();
@@ -34,6 +41,16 @@ export default function UsersPage() {
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+
+  // Step-up password gate: every sensitive action must pass this first.
+  const [gate, setGate] = useState<{ action: GateAction; user?: any } | null>(null);
+  const [gateError, setGateError] = useState<string | null>(null);
+  const [gateLoading, setGateLoading] = useState(false);
+  const [authorizedPw, setAuthorizedPw] = useState("");
+
+  // Inline validation errors for the add / edit forms.
+  const [addError, setAddError] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     username: "",
@@ -66,6 +83,27 @@ export default function UsersPage() {
     return { total: list.length, admins: list.filter((u: any) => u.role === "admin" && u.is_active).length, superAdmins: list.filter((u: any) => u.role === "super_admin").length, locked: list.filter((u: any) => u.account_status === "locked").length };
   }, [q.data]);
 
+  // Barangays already occupied by an active admin — one admin per barangay.
+  const adminBarangayIds = useMemo(() => {
+    const taken = new Set<string>();
+    (q.data || []).forEach((u: any) => {
+      if (u.role === "admin" && u.is_active && u.barangay_id) taken.add(String(u.barangay_id));
+    });
+    return taken;
+  }, [q.data]);
+
+  // Only one active Super Admin is allowed.
+  const activeSuperIds = useMemo(() => {
+    const ids = new Set<string>();
+    (q.data || []).forEach((u: any) => {
+      if (u.role === "super_admin" && u.is_active) ids.add(String(u.id));
+    });
+    return ids;
+  }, [q.data]);
+
+  const addSuperBlocked = activeSuperIds.size > 0;
+  const editSuperBlocked = Array.from(activeSuperIds).some((id) => id !== String(selectedUser?.id));
+
   // Filtered users
   const filteredUsers = useMemo(() => {
     let list = q.data || [];
@@ -83,14 +121,31 @@ export default function UsersPage() {
       await api.post("/api/users", {
         ...form,
         barangay_id: form.role === "admin" && form.barangay_id ? form.barangay_id : undefined,
+        current_password: authorizedPw,
       });
       setForm({ username: "", email: "", password: "Admin@123", role: "admin", barangay_id: "" });
       setShowAddForm(false);
+      setAuthorizedPw("");
       q.refetch();
       alert("User account created successfully!");
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Error creating user.");
+      if (isInvalidPassword(err)) {
+        setShowAddForm(false);
+        setGate({ action: "create" });
+        setGateError("Incorrect password. Please try again.");
+      } else if (err?.response?.status === 409) {
+        const detail = err?.response?.data?.detail;
+        if (detail === "SUPER_ADMIN_EXISTS") {
+          setAddError("A Super Admin account already exists. Only one Super Admin is allowed.");
+          setForm((f) => ({ ...f, role: "admin", barangay_id: f.barangay_id }));
+        } else {
+          setAddError("This barangay already has an active admin. Pick a different barangay, or deactivate the existing admin first.");
+          setForm((f) => ({ ...f, barangay_id: "" }));
+        }
+      } else {
+        alert("Error creating user.");
+      }
     }
   }
 
@@ -102,48 +157,113 @@ export default function UsersPage() {
       await api.put(`/api/users/${selectedUser.id}`, {
         ...editForm,
         barangay_id: editForm.role === "admin" && editForm.barangay_id ? editForm.barangay_id : undefined,
+        current_password: authorizedPw,
       });
       setSelectedUser(null);
+      setAuthorizedPw("");
       q.refetch();
       alert("User account updated successfully!");
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Error updating user.");
+      if (isInvalidPassword(err)) {
+        const target = selectedUser;
+        setSelectedUser(null);
+        setGate({ action: "edit", user: target });
+        setGateError("Incorrect password. Please try again.");
+      } else if (err?.response?.status === 409) {
+        const detail = err?.response?.data?.detail;
+        // Keep the edit form open so the pick can be corrected.
+        if (detail === "SUPER_ADMIN_EXISTS") {
+          setEditError("A Super Admin account already exists. Only one Super Admin is allowed.");
+          setEditForm((f) => ({ ...f, role: "admin", barangay_id: "" }));
+        } else {
+          setEditError("This barangay already has an active admin. Pick a different barangay, or deactivate the existing admin first.");
+          setEditForm((f) => ({ ...f, barangay_id: "" }));
+        }
+      } else {
+        alert("Error updating user.");
+      }
     }
   }
 
-  // Reset Password
-  async function handleResetPassword(userId: string) {
+  // Reset Password — throws so the password gate can surface the error.
+  async function handleResetPassword(userId: string, password: string) {
+    const res = await api.post(`/api/users/${userId}/reset-password`, { current_password: password });
+    setTempPassword(res.data.temporary_password);
+    q.refetch();
+  }
+
+  // Deactivate User — throws so the password gate can surface the error.
+  async function handleDeactivateUser(userId: string, password: string) {
+    await api.delete(`/api/users/${userId}`, { data: { current_password: password } });
+    q.refetch();
+  }
+
+  // Update Account Status (lock/unlock) — throws so the password gate can surface the error.
+  async function handleUpdateAccountStatus(userId: string, status: string, password: string) {
+    await api.patch(`/api/users/${userId}/account-status`, {
+      account_status: status,
+      current_password: password,
+    });
+    q.refetch();
+  }
+
+  // Central handler for the password-gate modal.
+  async function handleGateConfirm(password: string) {
+    if (!gate) return;
+    const { action, user: target } = gate;
+    setGateLoading(true);
+    setGateError(null);
     try {
-      const res = await api.post(`/api/users/${userId}/reset-password`);
-      setTempPassword(res.data.temporary_password);
-    } catch (err) {
+      if (action === "create") {
+        await api.post("/api/auth/verify-password", { password });
+        setAuthorizedPw(password);
+        setGate(null);
+        setAddError(null);
+        setShowAddForm(true);
+        return;
+      }
+      if (action === "edit") {
+        await api.post("/api/auth/verify-password", { password });
+        setAuthorizedPw(password);
+        setGate(null);
+        setEditError(null);
+        setSelectedUser(target);
+        setEditForm({
+          username: target.username,
+          email: target.email,
+          password: "",
+          role: target.role,
+          barangay_id: target.barangay_id || "",
+        });
+        return;
+      }
+      if (action === "reset") {
+        await handleResetPassword(target.id, password);
+      } else if (action === "lock") {
+        await handleUpdateAccountStatus(target.id, "locked", password);
+      } else if (action === "unlock") {
+        await handleUpdateAccountStatus(target.id, "active", password);
+      } else if (action === "delete") {
+        await handleDeactivateUser(target.id, password);
+      }
+      setGate(null);
+    } catch (err: any) {
       console.error(err);
-      alert("Error resetting password.");
+      setGateError(
+        isInvalidPassword(err)
+          ? "Incorrect password. Please try again."
+          : err?.response?.data?.detail || "Action failed. Please try again."
+      );
+    } finally {
+      setGateLoading(false);
     }
   }
 
-  // Deactivate User
-  async function handleDeactivateUser(userId: string) {
-    if (!window.confirm("Are you sure you want to deactivate this user?")) return;
-    try {
-      await api.delete(`/api/users/${userId}`);
-      q.refetch();
-    } catch (err) {
-      console.error(err);
-      alert("Error deactivating user.");
-    }
-  }
-
-  // Update Account Status (lock/unlock)
-  async function handleUpdateAccountStatus(userId: string, status: string) {
-    try {
-      await api.patch(`/api/users/${userId}/account-status`, { account_status: status });
-      q.refetch();
-    } catch (err) {
-      console.error(err);
-      alert("Error updating account status.");
-    }
+  function closeGate() {
+    if (gateLoading) return;
+    setGate(null);
+    setGateError(null);
   }
 
   // Permissions Matrix data
@@ -168,7 +288,7 @@ export default function UsersPage() {
           </p>
         </div>
         <button
-          onClick={() => setShowAddForm(true)}
+          onClick={() => setGate({ action: "create" })}
           className="admin-action-btn-primary mt-4 md:mt-0 flex items-center gap-2 text-xs px-4 py-2.5 rounded-lg self-start md:self-auto"
         >
           <UserPlus className="h-4 w-4" />
@@ -260,23 +380,14 @@ export default function UsersPage() {
                       <td className="admin-table-cell font-semibold text-slate-450">{u.last_login ? new Date(u.last_login).toLocaleDateString() : "N/A"}</td>
                       <td className="admin-table-cell pr-3 text-right space-x-2 whitespace-nowrap">
                         <button
-                          onClick={() => {
-                            setSelectedUser(u);
-                            setEditForm({
-                              username: u.username,
-                              email: u.email,
-                              password: "",
-                              role: u.role,
-                              barangay_id: u.barangay_id || "",
-                            });
-                          }}
+                          onClick={() => setGate({ action: "edit", user: u })}
                           className="admin-action-btn-secondary inline-flex p-1.5 rounded-lg text-slate-500 hover:text-slate-800"
                           title="Edit User"
                         >
                           <Edit2 className="h-3.5 w-3.5" />
                         </button>
                         <button
-                          onClick={() => handleResetPassword(u.id)}
+                          onClick={() => setGate({ action: "reset", user: u })}
                           className="admin-action-btn-secondary inline-flex p-1.5 rounded-lg text-teal-600 hover:text-teal-800"
                           title="Reset Password"
                         >
@@ -284,7 +395,7 @@ export default function UsersPage() {
                         </button>
                         {acct === "locked" ? (
                           <button
-                            onClick={() => handleUpdateAccountStatus(u.id, "active")}
+                            onClick={() => setGate({ action: "unlock", user: u })}
                             className="admin-action-btn-secondary inline-flex p-1.5 rounded-lg text-green-600 hover:text-green-800"
                             title="Unlock Account"
                           >
@@ -292,7 +403,7 @@ export default function UsersPage() {
                           </button>
                         ) : (
                           <button
-                            onClick={() => handleUpdateAccountStatus(u.id, "locked")}
+                            onClick={() => setGate({ action: "lock", user: u })}
                             className="admin-action-btn-secondary inline-flex p-1.5 rounded-lg text-amber-600 hover:text-amber-800"
                             title="Lock Account"
                           >
@@ -301,7 +412,7 @@ export default function UsersPage() {
                         )}
                         {u.is_active && (
                           <button
-                            onClick={() => handleDeactivateUser(u.id)}
+                            onClick={() => setGate({ action: "delete", user: u })}
                             className="admin-action-btn-secondary inline-flex p-1.5 rounded-lg text-red-500 hover:text-red-700"
                             title="Deactivate Account"
                           >
@@ -436,29 +547,54 @@ export default function UsersPage() {
                 <select
                   className="admin-interactive-input w-full rounded-lg px-3 py-2 text-xs bg-white text-slate-700"
                   value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value })}
+                  onChange={(e) => {
+                    setForm({ ...form, role: e.target.value });
+                    setAddError(null);
+                  }}
                 >
                   <option value="admin">Barangay Admin</option>
-                  <option value="super_admin">Super Admin</option>
+                  <option value="super_admin" disabled={addSuperBlocked}>
+                    Super Admin{addSuperBlocked ? " — one already exists" : ""}
+                  </option>
                 </select>
+                {addSuperBlocked && (
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Only one Super Admin account is allowed in the system.
+                  </p>
+                )}
               </div>
 
               {form.role === "admin" && (
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Assign Barangay</label>
+                  <p className="text-[11px] text-slate-400 mb-1.5">
+                    One active admin per barangay — occupied slots are disabled.
+                  </p>
                   <select
                     className="admin-interactive-input w-full rounded-lg px-3 py-2 text-xs bg-white text-slate-700"
                     value={form.barangay_id}
-                    onChange={(e) => setForm({ ...form, barangay_id: e.target.value })}
+                    onChange={(e) => {
+                      setForm({ ...form, barangay_id: e.target.value });
+                      setAddError(null);
+                    }}
                     required
                   >
                     <option value="">Select a barangay</option>
-                    {barangays.data?.map((b: any) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
+                    {barangays.data?.map((b: any) => {
+                      const taken = adminBarangayIds.has(String(b.id));
+                      return (
+                        <option key={b.id} value={b.id} disabled={taken}>
+                          {b.name}
+                          {taken ? " — already has an admin" : ""}
+                        </option>
+                      );
+                    })}
                   </select>
+                  {addError && (
+                    <p className="text-xs text-red-600 font-semibold mt-1.5" role="alert">
+                      {addError}
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -542,32 +678,58 @@ export default function UsersPage() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">User Role</label>
-                <select
-                  className="admin-interactive-input w-full rounded-lg px-3 py-2 text-xs bg-white text-slate-700"
-                  value={editForm.role}
-                  onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
-                >
-                  <option value="admin">Barangay Admin</option>
-                  <option value="super_admin">Super Admin</option>
-                </select>
+                  <select
+                    className="admin-interactive-input w-full rounded-lg px-3 py-2 text-xs bg-white text-slate-700"
+                    value={editForm.role}
+                    onChange={(e) => {
+                      setEditForm({ ...editForm, role: e.target.value });
+                      setEditError(null);
+                    }}
+                  >
+                    <option value="admin">Barangay Admin</option>
+                    <option value="super_admin" disabled={editSuperBlocked}>
+                      Super Admin{editSuperBlocked ? " — one already exists" : ""}
+                    </option>
+                  </select>
+                  {editSuperBlocked && (
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Only one Super Admin account is allowed — this user cannot be promoted.
+                    </p>
+                  )}
               </div>
 
               {editForm.role === "admin" && (
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Assigned Barangay</label>
+                  <p className="text-[11px] text-slate-400 mb-1.5">
+                    One active admin per barangay — the user&apos;s current barangay stays selectable.
+                  </p>
                   <select
                     className="admin-interactive-input w-full rounded-lg px-3 py-2 text-xs bg-white text-slate-700"
                     value={editForm.barangay_id}
-                    onChange={(e) => setEditForm({ ...editForm, barangay_id: e.target.value })}
+                    onChange={(e) => {
+                      setEditForm({ ...editForm, barangay_id: e.target.value });
+                      setEditError(null);
+                    }}
                     required
                   >
                     <option value="">Select a barangay</option>
-                    {barangays.data?.map((b: any) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
+                    {barangays.data?.map((b: any) => {
+                      const isOwn = String(b.id) === String(selectedUser?.barangay_id);
+                      const taken = !isOwn && adminBarangayIds.has(String(b.id));
+                      return (
+                        <option key={b.id} value={b.id} disabled={taken}>
+                          {b.name}
+                          {taken ? " — already has an admin" : ""}
+                        </option>
+                      );
+                    })}
                   </select>
+                  {editError && (
+                    <p className="text-xs text-red-600 font-semibold mt-1.5" role="alert">
+                      {editError}
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -641,6 +803,40 @@ export default function UsersPage() {
           </div>
         </div>
       )}
+
+      {/* Step-up password gate — blocks every sensitive action */}
+      <PasswordConfirmModal
+        open={!!gate}
+        onClose={closeGate}
+        onConfirm={handleGateConfirm}
+        loading={gateLoading}
+        error={gateError}
+        title="Confirm your identity"
+        description={
+          gate?.action === "delete"
+            ? "Enter your password to deactivate this account"
+            : gate?.action === "reset"
+            ? "Enter your password to reset this account's password"
+            : gate?.action === "lock"
+            ? "Enter your password to lock this account"
+            : gate?.action === "unlock"
+            ? "Enter your password to unlock this account"
+            : "Enter your password to continue"
+        }
+        targetLabel={gate?.user?.username ?? "New user account"}
+        confirmLabel={
+          gate?.action === "delete"
+            ? "Deactivate"
+            : gate?.action === "reset"
+            ? "Reset Password"
+            : gate?.action === "lock"
+            ? "Lock Account"
+            : gate?.action === "unlock"
+            ? "Unlock Account"
+            : "Confirm"
+        }
+        danger={gate?.action === "delete" || gate?.action === "lock"}
+      />
     </div>
   );
 }

@@ -7,7 +7,7 @@ from jose import JWTError
 from ..database import get_db
 from ..models import User
 from ..models.entities import UserRole
-from ..utils.security import decode_token
+from ..utils.security import decode_token, verify_password
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -53,6 +53,27 @@ async def require_super_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != UserRole.super_admin:
         raise HTTPException(status_code=403, detail="Super admin access required")
     return user
+
+
+async def verify_superadmin_password(
+    password: str | None,
+    user: User,
+) -> None:
+    """
+    Step-up re-authentication for destructive superadmin actions.
+
+    The caller must already be a super_admin (use with require_super_admin);
+    this additionally proves the operator still knows the account password,
+    so a stolen/leaked JWT alone cannot reset, lock or delete user accounts.
+
+    Raises: 403 with detail "INVALID_PASSWORD" if the password is wrong.
+
+    NOTE: intentionally returns 403, never 401. The frontend axios
+    interceptor (lib/api.ts) treats any 401 as an expired session and
+    silently retries after a token refresh, which would mask this error.
+    """
+    if not password or not verify_password(password, user.password_hash):
+        raise HTTPException(status_code=403, detail="INVALID_PASSWORD")
 
 
 async def require_admin(user: User = Depends(get_current_user)) -> User:
