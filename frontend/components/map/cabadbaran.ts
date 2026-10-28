@@ -6,8 +6,8 @@ export const CABADBARAN_CENTER: LatLngExpression = [9.118, 125.565];
 
 // Tight bounds covering all 31 barangays (derived from OSM coordinates)
 export const CABADBARAN_BOUNDS: LatLngBoundsExpression = [
-  [9.07,  125.51],  // SW
-  [9.20,  125.65],  // NE
+  [9.06,  125.515],  // SW
+  [9.23,  125.775],  // NE
 ];
 
 // Barangays NOT part of Cabadbaran City — excluded from all map/heatmap displays
@@ -17,7 +17,7 @@ export const CABADBARAN_MAP_OPTIONS = {
   center: CABADBARAN_CENTER,
   maxBounds: CABADBARAN_BOUNDS,
   maxBoundsViscosity: 1.0,
-  minZoom: 12,
+  minZoom: 11,
   zoom: 13,
   zoomControl: true,
   zoomAnimation: false,
@@ -31,11 +31,11 @@ export const CABADBARAN_MASK: LatLngExpression[][] = [
   [[-90, -180], [90, -180], [90, 180], [-90, 180], [-90, -180]],
   // Inner hole: only this rectangle is left clear = Cabadbaran City bounds
   [
-    [9.07,  125.51],
-    [9.07,  125.65],
-    [9.20,  125.65],
-    [9.20,  125.51],
-    [9.07,  125.51],
+    [9.06,  125.515],
+    [9.06,  125.775],
+    [9.23,  125.775],
+    [9.23,  125.515],
+    [9.06,  125.515],
   ],
 ];
 

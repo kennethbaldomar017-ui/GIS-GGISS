@@ -9,6 +9,7 @@ out/
 dist/
 
 backend/uploads/
+.run-logs/
 backend/.env
 backend/.env.local
 frontend/.env*.local

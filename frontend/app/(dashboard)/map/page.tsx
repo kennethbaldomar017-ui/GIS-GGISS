@@ -47,9 +47,10 @@ export default function MapPage() {
   }, [barangayParam]);
   
   const isAdmin = user?.role === "admin";
-  const title   = isAdmin ? "Purok Map" : "Cabadbaran City Map";
+  const title = isAdmin ? "Purok Map" : barangayParam ? `${barangayParam} Map` : "Cabadbaran City Map";
   const subtitle = isAdmin
     ? "Child markers & malnutrition heatmap for your barangay"
+    : barangayParam ? "Child markers & malnutrition heatmap for this barangay"
     : "All registered children & city-wide malnutrition heatmap";
 
   // Layer visibility states
@@ -64,7 +65,7 @@ export default function MapPage() {
   const [currentTileLayer, setCurrentTileLayer] = useState<string>("Default");
 
   return (
-    <div className="flex flex-col gap-4" style={{ height: "calc(100vh - 72px)" }}>
+    <div className="flex min-h-[calc(100vh-72px)] flex-col gap-4 lg:h-[calc(100vh-72px)]">
       {/* Header */}
       <div className="admin-page-header shrink-0">
         <h1 className="text-2xl font-bold">{title}</h1>
@@ -74,7 +75,7 @@ export default function MapPage() {
       {/* Map + sidebar - fills remaining height */}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[1fr_260px]">
         {/* Map fills all available height */}
-        <section className="relative h-full min-h-[420px] rounded-xl border border-slate-200 overflow-hidden shadow-sm lg:min-h-0">
+        <section className="relative h-[60vh] min-h-[420px] rounded-xl border border-slate-200 overflow-hidden shadow-sm lg:h-full lg:min-h-0">
           <DynamicMap 
             showHotspots={showHotspots}
             showProgramCoverage={showProgramCoverage}
@@ -92,7 +93,7 @@ export default function MapPage() {
         </section>
 
         {/* Sidebar */}
-        <div className="flex flex-col gap-4 overflow-auto">
+        <div className="flex flex-col gap-4 lg:overflow-auto">
           <MapControls 
             showHotspots={showHotspots}
             setShowHotspots={setShowHotspots}
@@ -111,7 +112,7 @@ export default function MapPage() {
             setHeatmapColorMode={setHeatmapColorMode}
             showHeatmapColorSelector={currentTileLayer === "Heatmap"}
           />
-          <MapSidebar />
+          <MapSidebar focusBarangay={barangayParam} />
         </div>
       </div>
     </div>

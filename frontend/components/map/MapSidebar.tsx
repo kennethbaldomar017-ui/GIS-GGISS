@@ -6,45 +6,32 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { ChevronDown } from "lucide-react";
 
-export function MapSidebar() {
+export function MapSidebar({ focusBarangay = null }: { focusBarangay?: string | null }) {
   const { user } = useAuthStore();
   const isAdmin = user?.role === "admin";
-  const [barangayParam, setBarangayParam] = useState<string | null>(null);
   const [expandedPuroks, setExpandedPuroks] = useState<Set<string>>(new Set());
+  const { data: mapData } = useQuery({
+    queryKey: ["barangay-choropleth", user?.id, user?.barangay_id, focusBarangay],
+    queryFn: () => api.get("/api/maps/barangay-choropleth", {
+      params: !isAdmin && focusBarangay ? { barangay_name: focusBarangay } : {},
+    }).then((response) => response.data),
+    enabled: !!user?.id && (isAdmin || !!focusBarangay),
+  });
+  const parent = mapData?.features?.find((feature: any) => feature.properties?.featureType === "barangay")?.properties;
+  const barangayId = isAdmin ? user?.barangay_id : focusBarangay ? parent?.id : null;
+  const barangayName = parent?.name ?? focusBarangay;
 
-  // Defer searchParams access to client-side only
-  useEffect(() => {
-    try {
-      const params = new URL(window.location.href).searchParams;
-      setBarangayParam(params.get("barangay"));
-    } catch (e) {
-      // SSR fallback
-    }
-  }, []);
-
-  // Fetch puroks for the focused barangay
   const { data: puroksData } = useQuery({
-    queryKey: ["puroks-for-barangay", barangayParam],
-    queryFn: () => {
-      if (!barangayParam) return null;
-      const decodedName = decodeURIComponent(barangayParam);
-      // Fetch puroks for this barangay
-      return api.get(`/api/puroks?barangay_name=${encodeURIComponent(decodedName)}`).then(r => r.data).catch(() => null);
-    },
-    enabled: !!barangayParam,
+    queryKey: ["map-puroks", user?.id, barangayId],
+    queryFn: () => api.get("/api/puroks", { params: { barangay_id: barangayId } }).then((response) => response.data),
+    enabled: !!barangayId,
   });
-
-  // Fetch children for the focused barangay
   const { data: childrenData } = useQuery({
-    queryKey: ["children-for-barangay", barangayParam],
-    queryFn: () => {
-      if (!barangayParam) return null;
-      const decodedName = decodeURIComponent(barangayParam);
-      // This endpoint needs to be created or we fetch all and filter
-      return api.get(`/api/children?barangay_name=${encodeURIComponent(decodedName)}`).then(r => r.data).catch(() => []);
-    },
-    enabled: !!barangayParam,
+    queryKey: ["map-children", user?.id, barangayId],
+    queryFn: () => api.get("/api/children", { params: { barangay_id: barangayId } }).then((response) => response.data),
+    enabled: !!barangayId,
   });
+  useEffect(() => { setExpandedPuroks(new Set()); }, [barangayId]);
 
   const togglePurok = (purokId: string) => {
     const newExpanded = new Set(expandedPuroks);
@@ -93,14 +80,19 @@ export function MapSidebar() {
       <div className="border-t border-slate-100 pt-3">
         <p className="text-[11px] font-semibold text-slate-700 mb-1">Heatmap Toggle</p>
         <p className="text-[10px] leading-relaxed text-slate-500">
-          Use the <strong>🔴 Heatmap ON/OFF</strong> button in the map to overlay malnutrition intensity by area using IDW interpolation.
+          Use the <strong>🔴 Heatmap ON/OFF</strong> button in the map to show scattered case dots inside each barangay’s display area. Green is normal, amber is moderate, red is severe, and gray is another measured status. The density slider adds visual coverage while preserving status proportions; display dots are not extra cases or household locations. Use the choropleth layer to compare prevalence.
         </p>
       </div>
 
+      <p className="text-[10px] leading-relaxed text-slate-500">
+        Orange dots mark approximate purok centers when no boundary is recorded.
+        Barangay outlines use simplified indicative NAMRIA / PSA boundaries, not surveyed or legal boundaries.
+      </p>
+
       {/* Show puroks list when focused on a barangay */}
-      {barangayParam && puroks.length > 0 && (
+      {barangayId && puroks.length > 0 && (
         <div className="border-t border-slate-100 pt-3">
-          <h3 className="font-semibold text-slate-800 text-xs mb-2">Puroks in {decodeURIComponent(barangayParam)}</h3>
+          <h3 className="font-semibold text-slate-800 text-xs mb-2">Puroks in {barangayName}</h3>
           <div className="space-y-1.5 max-h-48 overflow-y-auto">
             {puroks.map((purok: any) => {
               const purokChildren = children.filter((c: any) => c.purok_id === purok.id);
@@ -142,6 +134,7 @@ export function MapSidebar() {
         <p className="text-[10px] leading-relaxed text-slate-500">
           {isAdmin
             ? "Pins represent children registered in your barangay, grouped by purok."
+            : barangayId ? `Pins represent children registered in ${barangayName}.`
             : "Pins represent registered children across all Cabadbaran City barangays."}
         </p>
       </div>

@@ -41,13 +41,6 @@ export function MapControls({
   setHeatmapColorMode,
   showHeatmapColorSelector = false,
 }: MapControlsProps) {
-  const colorModeOptions: { value: HeatmapColorMode; label: string }[] = [
-    { value: "red-yellow-green", label: "🔴 Red-Yellow-Green" },
-    { value: "blue-purple", label: "🔵 Blue-Purple" },
-    { value: "fire", label: "🔥 Fire" },
-    { value: "ocean", label: "🌊 Ocean" },
-    { value: "cool", label: "❄️ Cool" },
-  ];
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex items-center gap-2 mb-3">
@@ -144,31 +137,7 @@ export function MapControls({
             />
           </label>
           
-          {/* Heatmap Color Mode Selector (shown when heatmap is ON and choropleth is OFF) */}
-          {(heatmapOn || showHeatmapColorSelector) && !choroplethOn && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-2">
-                Heatmap Color Mode
-              </label>
-              <div className="space-y-1.5">
-                {colorModeOptions.map((option) => (
-                  <label key={option.value} className="flex items-center gap-2 cursor-pointer group">
-                    <input
-                      type="radio"
-                      name="heatmap-color-mode"
-                      value={option.value}
-                      checked={heatmapColorMode === option.value}
-                      onChange={(e) => setHeatmapColorMode?.(e.target.value as HeatmapColorMode)}
-                      className="rounded-full text-teal-600 focus:ring-teal-500 h-3.5 w-3.5"
-                    />
-                    <span className="text-xs font-medium text-slate-700 group-hover:text-slate-900">
-                      {option.label}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
+          <p className="text-[10px] leading-relaxed text-slate-500">Scattered dots use green for normal, amber for moderate, red for severe, and gray for other measured statuses. Dot density is illustrative; colors preserve the measured status proportions.</p>
         </div>
       )}
 

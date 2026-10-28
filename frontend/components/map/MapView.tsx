@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { MapContainer, TileLayer, Marker, Polygon, GeoJSON, Popup, useMap } from "react-leaflet";
 import { useQuery } from "@tanstack/react-query";
 import L from "leaflet";
+import { COLOR_PALETTES, getChoroplethColor, getTier, hasHeatmapData, CASE_DOT_STYLES, scatterCaseDots, type HeatmapColorMode, type TierDefinition, type AreaGeometry } from "./heatmap-renderer";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
 import { STATUS_COLORS, getStatusColor } from "@/lib/theme";
@@ -36,18 +37,25 @@ function formatCoordinate(value: unknown, digits = 5): string {
 }
 
 // ─── Helper: pan/zoom controller ─────────────────────────────────────────────
-function MapCenterController({ center, zoom }: { center: [number, number]; zoom: number }) {
+function MapCenterController({ center, zoom, boundaries }: { center: [number, number]; zoom: number; boundaries?: any }) {
   const map = useMap();
+  useEffect(() => {
+    const observer = new ResizeObserver(() => map.invalidateSize({ pan: false }));
+    observer.observe(map.getContainer());
+    return () => { observer.disconnect(); };
+  }, [map]);
   useEffect(() => {
     try {
       if (map && map.getContainer().isConnected) {
         map.stop();
-        map.setView(center, zoom);
+        const bounds = boundaries ? L.geoJSON(boundaries).getBounds() : null;
+        if (bounds?.isValid()) map.fitBounds(bounds, { padding: [30, 30], maxZoom: zoom });
+        else map.setView(center, zoom);
       }
     } catch (err) {
       console.error('[MapCenterController] Error setting view:', err);
     }
-  }, [center, zoom, map]);
+  }, [center, zoom, map, boundaries]);
   return null;
 }
 
@@ -108,6 +116,9 @@ type BarangaySeverity = {
   alert_count: number;
   malnutrition_count: number;
   moderate_count: number;
+  normal_count?: number;
+  other_count?: number;
+  scatter_geometry?: AreaGeometry;
   name: string;
   prevalence_rate: number;
   risk_level: "critical" | "high" | "medium" | "low";
@@ -143,21 +154,6 @@ return new L.Icon({
 // NOTE: Must have non-zero opacity for Leaflet to fire mouse events!
 // Using low opacity (0.05) to maintain interactivity while staying nearly invisible
 // ─── Choropleth Color Function - Get color based on malnutrition density ─────
-function getChoroplethColor(malnutritionCount: number, totalChildren: number): string {
-  // Calculate prevalence rate (percentage)
-  const prevalenceRate = totalChildren > 0 ? (malnutritionCount / totalChildren) * 100 : 0;
-  
-  // Color scheme based on prevalence rate (matching your requirements)
-  if (prevalenceRate > 20) return '#800026';      // Very High (>20%)
-  if (prevalenceRate > 15) return '#BD0026';      // High (15-20%)
-  if (prevalenceRate > 10) return '#E31A1C';      // Moderate-High (10-15%)
-  if (prevalenceRate > 7)  return '#FC4E2A';      // Moderate (7-10%)
-  if (prevalenceRate > 4)  return '#FD8D3C';      // Low-Moderate (4-7%)
-  if (prevalenceRate > 2)  return '#FEB24C';      // Low (2-4%)
-  if (prevalenceRate > 0)  return '#FED976';      // Very Low (0-2%)
-  return '#FFEDA0';                                // No cases
-}
-
 // ─── Get Choropleth Style for Barangay ───────────────────────────────────────
 function getChoroplethStyle(
   feature: any,
@@ -219,90 +215,12 @@ const barangayStyle: L.PathOptions = {
 };
 
 // ─── Heatmap Legend tiers ─────────────────────────────────────────────────────
-type HeatmapColorMode = "red-yellow-green" | "blue-purple" | "fire" | "ocean" | "cool";
+const TIERS = COLOR_PALETTES["red-yellow-green"];
 
-type TierDefinition = {
-  label: string;
-  range: string;
-  min: number;
-  max: number;
-  weight: number;
-  color: string;
-  labelColor: string;
-};
-
-const COLOR_PALETTES: Record<HeatmapColorMode, TierDefinition[]> = {
-  "red-yellow-green": [
-    { label: "Low",           range: "0-4 cases",   min: 0,  max: 4,        weight: 0.06, color: "#4ade80", labelColor: "#16a34a" },
-    { label: "Low-Moderate",  range: "5-9 cases",   min: 5,  max: 9,        weight: 0.25, color: "#fde047", labelColor: "#ca8a04" },
-    { label: "Moderate",      range: "10-14 cases", min: 10, max: 14,       weight: 0.44, color: "#fdba74", labelColor: "#ea580c" },
-    { label: "Moderate-High", range: "15-19 cases", min: 15, max: 19,       weight: 0.62, color: "#fb923c", labelColor: "#c2410c" },
-    { label: "High",          range: "20-24 cases", min: 20, max: 24,       weight: 0.80, color: "#f87171", labelColor: "#b91c1c" },
-    { label: "Very High",     range: "25+ cases",   min: 25, max: Infinity, weight: 1.00, color: "#dc2626", labelColor: "#991b1b" },
-  ],
-  "blue-purple": [
-    { label: "Low",           range: "0-4 cases",   min: 0,  max: 4,        weight: 0.06, color: "#60a5fa", labelColor: "#1e40af" },
-    { label: "Low-Moderate",  range: "5-9 cases",   min: 5,  max: 9,        weight: 0.25, color: "#7c3aed", labelColor: "#5b21b6" },
-    { label: "Moderate",      range: "10-14 cases", min: 10, max: 14,       weight: 0.44, color: "#a855f7", labelColor: "#6b21a8" },
-    { label: "Moderate-High", range: "15-19 cases", min: 15, max: 19,       weight: 0.62, color: "#d946ef", labelColor: "#831843" },
-    { label: "High",          range: "20-24 cases", min: 20, max: 24,       weight: 0.80, color: "#ec4899", labelColor: "#831843" },
-    { label: "Very High",     range: "25+ cases",   min: 25, max: Infinity, weight: 1.00, color: "#be123c", labelColor: "#800726" },
-  ],
-  "fire": [
-    { label: "Low",           range: "0-4 cases",   min: 0,  max: 4,        weight: 0.06, color: "#fef3c7", labelColor: "#92400e" },
-    { label: "Low-Moderate",  range: "5-9 cases",   min: 5,  max: 9,        weight: 0.25, color: "#fcd34d", labelColor: "#b45309" },
-    { label: "Moderate",      range: "10-14 cases", min: 10, max: 14,       weight: 0.44, color: "#fbbf24", labelColor: "#d97706" },
-    { label: "Moderate-High", range: "15-19 cases", min: 15, max: 19,       weight: 0.62, color: "#f59e0b", labelColor: "#d97706" },
-    { label: "High",          range: "20-24 cases", min: 20, max: 24,       weight: 0.80, color: "#ea580c", labelColor: "#7c2d12" },
-    { label: "Very High",     range: "25+ cases",   min: 25, max: Infinity, weight: 1.00, color: "#7c2d12", labelColor: "#431407" },
-  ],
-  "ocean": [
-    { label: "Low",           range: "0-4 cases",   min: 0,  max: 4,        weight: 0.06, color: "#cffafe", labelColor: "#164e63" },
-    { label: "Low-Moderate",  range: "5-9 cases",   min: 5,  max: 9,        weight: 0.25, color: "#06b6d4", labelColor: "#164e63" },
-    { label: "Moderate",      range: "10-14 cases", min: 10, max: 14,       weight: 0.44, color: "#0891b2", labelColor: "#164e63" },
-    { label: "Moderate-High", range: "15-19 cases", min: 15, max: 19,       weight: 0.62, color: "#0e7490", labelColor: "#164e63" },
-    { label: "High",          range: "20-24 cases", min: 20, max: 24,       weight: 0.80, color: "#155e75", labelColor: "#ecf0f1" },
-    { label: "Very High",     range: "25+ cases",   min: 25, max: Infinity, weight: 1.00, color: "#082f49", labelColor: "#ecf0f1" },
-  ],
-  "cool": [
-    { label: "Low",           range: "0-4 cases",   min: 0,  max: 4,        weight: 0.06, color: "#a7f3d0", labelColor: "#065f46" },
-    { label: "Low-Moderate",  range: "5-9 cases",   min: 5,  max: 9,        weight: 0.25, color: "#6ee7b7", labelColor: "#047857" },
-    { label: "Moderate",      range: "10-14 cases", min: 10, max: 14,       weight: 0.44, color: "#34d399", labelColor: "#047857" },
-    { label: "Moderate-High", range: "15-19 cases", min: 15, max: 19,       weight: 0.62, color: "#10b981", labelColor: "#065f46" },
-    { label: "High",          range: "20-24 cases", min: 20, max: 24,       weight: 0.80, color: "#059669", labelColor: "#ecf0f1" },
-    { label: "Very High",     range: "25+ cases",   min: 25, max: Infinity, weight: 1.00, color: "#047857", labelColor: "#ecf0f1" },
-  ],
-};
-
-let TIERS = COLOR_PALETTES["red-yellow-green"];
-
-function getWeight(count: number): number {
-  return TIERS.find((t) => count >= t.min && count <= t.max)?.weight ?? 0.06;
-}
-function getLabelColor(count: number): string {
-  return TIERS.find((t) => count >= t.min && count <= t.max)?.labelColor ?? "#16a34a";
-}
-
-// ─── IDW interpolation ────────────────────────────────────────────────────────
-function idw(lat: number, lng: number, pts: { lat: number; lng: number; w: number }[]): number {
-  let num = 0, den = 0;
-  for (const p of pts) {
-    const d2 = (lat - p.lat) ** 2 + (lng - p.lng) ** 2;
-    if (d2 < 1e-10) return p.w;
-    const inv = 1 / d2;
-    num += inv * p.w;
-    den += inv;
-  }
-  return den > 0 ? num / den : 0;
-}
-
-function hexToRgb(hex: string): [number, number, number] {
-  return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
-}
-
-function intensityToRGB(t: number): [number, number, number] {
-  const tier = TIERS.find((tier) => t <= tier.weight) || TIERS[TIERS.length - 1];
-  return hexToRgb(tier.color);
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[character]!));
 }
 
 // ─── Popup HTML for heatmap labels ───────────────────────────────────────────
@@ -343,8 +261,8 @@ function buildNewsIndicators(props: BarangaySeverity): {
 }
 
 // ─── Popup HTML for barangay labels with enhanced information ──────────────
-function buildPopupHtml(props: BarangaySeverity) {
-  const tier = TIERS.find((t) => props.malnutrition_count >= t.min && props.malnutrition_count <= t.max) ?? TIERS[0];
+function buildPopupHtml(props: BarangaySeverity, tiers = TIERS) {
+  const tier = getTier(props.malnutrition_count, tiers);
   const riskInfo = getRiskLevelInfo(props.risk_level);
   const newsIndicators = buildNewsIndicators(props);
   const malnutritionPercentage = props.total_children > 0 ? ((props.malnutrition_count / props.total_children) * 100).toFixed(1) : "0";
@@ -467,114 +385,65 @@ function buildPopupHtml(props: BarangaySeverity) {
     </div>`;
 }
 
-// ─── Geographic bounds for IDW canvas ────────────────────────────────────────
-const GEO = { south: 9.07, north: 9.20, west: 125.51, east: 125.65 } as const;
-
-// ─── IDW Canvas heatmap layer (malnutrition intensity) ───────────────────────
-function IDWCanvasLayer({ data, showLabels = true, colorMode = "red-yellow-green", opacity = 0.82 }: { data: BarangaySeverity[]; showLabels?: boolean; colorMode?: HeatmapColorMode; opacity?: number }) {
+// Polygon-clipped dot density is illustrative; measured counts remain in the popup.
+function StatusDotLayer({ data, centers, showLabels, density }: {
+  data: BarangaySeverity[]; centers: { name: string; lat: number; lng: number }[];
+  showLabels: boolean; density: number;
+}) {
   const map = useMap();
-  const overlayRef = useRef<L.ImageOverlay | null>(null);
-  const groupRef   = useRef<L.LayerGroup | null>(null);
-
   useEffect(() => {
-    // Update TIERS based on selected color mode
-    TIERS = COLOR_PALETTES[colorMode];
-
-    if (!data || data.length === 0) return;
-
-    const pts = data
-      .map((b) => isValidCoordinate(b.lat, b.lng) ? { lat: b.lat, lng: b.lng, w: getWeight(b.malnutrition_count) } : null)
-      .filter(Boolean) as { lat: number; lng: number; w: number }[];
-    const CW = 400, CH = 400;
-    const raw = document.createElement("canvas");
-    raw.width = CW; raw.height = CH;
-    const rawCtx = raw.getContext("2d")!;
-    const imgData = rawCtx.createImageData(CW, CH);
-    const px = imgData.data;
-    const latRange = GEO.north - GEO.south;
-    const lngRange = GEO.east  - GEO.west;
-    const maxRadius = 0.025;
-
-    for (let y = 0; y < CH; y++) {
-      for (let x = 0; x < CW; x++) {
-        const lat = GEO.north - (y / CH) * latRange;
-        const lng = GEO.west  + (x / CW) * lngRange;
-        let minDist2 = Infinity;
-        for (const p of pts) {
-          const d2 = (lat - p.lat) ** 2 + (lng - p.lng) ** 2;
-          if (d2 < minDist2) minDist2 = d2;
-        }
-        const minDist = Math.sqrt(minDist2);
-        const i = (y * CW + x) * 4;
-        if (minDist >= maxRadius) {
-          px[i] = px[i+1] = px[i+2] = px[i+3] = 0;
-        } else {
-          // Keep each pixel in the nearest barangay's case-count band. IDW blending
-          // can otherwise turn a low-count barangay orange because of a nearby high one.
-          const nearestPoint = pts.reduce((nearest, point) => {
-            const distance = (lat - point.lat) ** 2 + (lng - point.lng) ** 2;
-            const nearestDistance = (lat - nearest.lat) ** 2 + (lng - nearest.lng) ** 2;
-            return distance < nearestDistance ? point : nearest;
-          });
-          const intensity = nearestPoint.w;
-          const [r, g, b] = intensityToRGB(intensity);
-          const ratio = minDist / maxRadius;
-          const fade = Math.cos(ratio * Math.PI / 2) ** 2;
-          px[i] = r; px[i+1] = g; px[i+2] = b;
-          px[i+3] = Math.round(fade * 215);
-        }
-      }
-    }
-    rawCtx.putImageData(imgData, 0, 0);
-
-    const blurred = document.createElement("canvas");
-    blurred.width = CW; blurred.height = CH;
-    const bCtx = blurred.getContext("2d")!;
-    bCtx.filter = "blur(14px)";
-    bCtx.drawImage(raw, 0, 0);
-
-    const overlay = L.imageOverlay(blurred.toDataURL("image/png"), [[GEO.south, GEO.west],[GEO.north, GEO.east]], {
-      opacity: opacity, interactive: false, zIndex: 400,
-    });
-    overlay.addTo(map);
-    overlayRef.current = overlay;
-
-    // Barangay count labels (only if showLabels is true)
     const group = L.layerGroup().addTo(map);
-    groupRef.current = group;
-    if (showLabels) {
-      data.forEach((b) => {
-        if (!b.lat || !b.lng) return;
-        const lc = getLabelColor(b.malnutrition_count);
-        const short = b.name.replace(/^Poblacion\s+/, "Pob. ");
-        const icon = L.divIcon({
-          className: "",
-          iconAnchor: [0, 0],
-          html: `<div style="transform:translate(-50%,-50%);text-align:center;pointer-events:auto;cursor:pointer;">
-            <div style="font-size:10px;font-weight:900;color:${lc};text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 6px rgba(0,0,0,0.9);line-height:1.1;white-space:nowrap;">${b.malnutrition_count}</div>
-            <div style="font-size:7px;font-weight:700;color:#fff;text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000;white-space:nowrap;margin-top:1px;">${short}</div>
-          </div>`,
+    const labels = L.layerGroup().addTo(map);
+    const renderer = L.canvas({ padding: 0.3 });
+    const valid = data.filter(area => isValidCoordinate(area.lat, area.lng));
+    valid.forEach(area => {
+      const name = escapeHtml(area.name);
+      const points = scatterCaseDots(area, centers, density);
+      for (const point of points) {
+        const display = CASE_DOT_STYLES[point.status];
+        const dot = L.circleMarker([point.lat, point.lng], {
+          renderer, radius: 2, color: "#ffffff", weight: 0.25,
+          fillColor: display.color, fillOpacity: 0.9,
         });
-        const marker = L.marker([b.lat, b.lng], { icon, interactive: true, zIndexOffset: 700 });
-        const popup = L.popup({ closeButton: false, autoClose: true, closeOnClick: false, offset: [0, -8], maxWidth: 400 }).setContent(buildPopupHtml(b));
-        marker.bindPopup(popup);
-        marker.on("mouseover", () => { 
-          marker.openPopup(); 
-        });
-        marker.on("mouseout", () => { 
-          marker.closePopup(); 
-        });
-        group.addLayer(marker);
+        dot.bindTooltip(`${name}: ${display.label} · illustrative density dot`, { direction: "top" });
+        dot.bindPopup(() => `<div style="min-width:210px;font:12px/1.7 system-ui;color:#334155;">
+          <strong style="font-size:15px;">${name}</strong>
+          <p style="margin:5px 0;color:${display.color};font-weight:700;">Display status: ${display.label}</p>
+          <div>Measured normal: <strong>${area.normal_count ?? 0}</strong></div>
+          <div>Measured moderate (MAM): <strong>${area.moderate_count}</strong></div>
+          <div>Measured severe (SAM): <strong>${area.severe_count}</strong></div>
+          <div>Other measured statuses: <strong>${area.other_count ?? 0}</strong></div>
+          <div>Eligible measurements: <strong>${area.total_children}</strong></div>
+          <div>Display dots: <strong>${points.length}</strong></div>
+          <p style="margin:6px 0 0;font-size:10px;color:#64748b;">Visual density preserves status proportions. Display dots are not extra cases or household locations. Outline: NAMRIA / PSA, simplified indicative boundary.</p>
+        </div>`, { maxWidth: 300 });
+        group.addLayer(dot);
+      }
+    });
+    const drawLabels = () => {
+      labels.clearLayers();
+      if (!showLabels || map.getZoom() < 14) return;
+      const occupied: L.Point[] = [];
+      valid.forEach(area => {
+        const position = map.latLngToContainerPoint([area.lat!, area.lng!]);
+        if (occupied.some(point => Math.abs(point.x - position.x) < 100 && Math.abs(point.y - position.y) < 34)) return;
+        occupied.push(position);
+        labels.addLayer(L.marker([area.lat!, area.lng!], {
+          interactive: false,
+          icon: L.divIcon({ className: "area-status-name", iconSize: [0, 0], iconAnchor: [0, -12],
+            html: `<span style="display:block;transform:translateX(-50%);width:max-content;padding:2px 5px;border-radius:4px;background:#fffffff0;color:#334155;font:600 10px/1.3 system-ui;white-space:nowrap;">${escapeHtml(area.name)}</span>`,
+          }),
+        }));
       });
-    }
-
-    return () => {
-      if (overlayRef.current) map.removeLayer(overlayRef.current);
-      if (groupRef.current)   map.removeLayer(groupRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, showLabels, colorMode, opacity]);
-
+    drawLabels();
+    map.on("zoomend moveend", drawLabels);
+    return () => {
+      map.off("zoomend moveend", drawLabels);
+      map.removeLayer(group); map.removeLayer(labels);
+      if (map.hasLayer(renderer)) map.removeLayer(renderer);
+    };
+  }, [map, data, centers, showLabels, density]);
   return null;
 }
 
@@ -689,7 +558,7 @@ function ChildMarkersLayer({
   useEffect(() => {
     const updateZoom = () => setZoom(map.getZoom());
     map.on("zoomend", updateZoom);
-    return () => map.off("zoomend", updateZoom);
+    return () => { map.off("zoomend", updateZoom); };
   }, [map]);
 
   if (!showProgramCoverage || heatmapOn || zoom < 15) return null;
@@ -769,10 +638,12 @@ function ChildMarkersLayer({
 // ─── Custom Hover Overlay Component (Canvas-based) ───────────────────────────
 function HoverOverlay({ 
   hoveredFeature, 
-  mousePosition 
+  mousePosition,
+  tiers = TIERS,
 }: { 
   hoveredFeature: any | null;
   mousePosition: { x: number; y: number } | null;
+  tiers?: TierDefinition[];
 }) {
   if (!hoveredFeature || !mousePosition) return null;
 
@@ -780,7 +651,7 @@ function HoverOverlay({
   
   // Get risk info styling
   const riskInfo = getRiskLevelInfo(props.risk_level || 'low');
-  const tier = TIERS.find((t) => props.malnutrition_count >= t.min && props.malnutrition_count <= t.max) ?? TIERS[0];
+  const tier = getTier(props.malnutrition_count, tiers);
   const newsIndicators = buildNewsIndicators(props);
   
   // Calculate additional metrics
@@ -956,6 +827,7 @@ function BarangayGeoJSON({
   setShowPurokModal,
   showOnlyOutlines = false,
   enableChoropleth = false,
+  enableInteractions = true,
   barangaySeverities = [],
 }: { 
   data: any; 
@@ -965,6 +837,7 @@ function BarangayGeoJSON({
   setShowPurokModal: (show: boolean) => void;
   showOnlyOutlines?: boolean;
   enableChoropleth?: boolean;
+  enableInteractions?: boolean;
   barangaySeverities?: BarangaySeverity[];
 }) {
   const router = useRouter();
@@ -989,61 +862,35 @@ function BarangayGeoJSON({
     }
   }, [data, user, enableChoropleth, barangaySeverities]);
 
+  const featureStyle = (feature: any): L.PathOptions => {
+    const isPurok = feature?.properties?.featureType === "purok";
+    if (enableChoropleth && !isPurok) {
+      return getChoroplethStyle(feature, barangaySeverities, false);
+    }
+    if (showOnlyOutlines) {
+      return { color: "#334155", fillOpacity: 0, weight: isPurok ? 1.5 : 2, opacity: 0.6 };
+    }
+    if (isPurok) {
+      return {
+        color: "#ea580c", fillColor: "#fed7aa",
+        fillOpacity: feature.geometry?.type === "Point" ? 0.85 : 0.3,
+        weight: 2, opacity: 0.9,
+        dashArray: feature.properties?.location_source === "barangay_fallback" ? "3 3" : undefined,
+      };
+    }
+    return { color: "#d1d5db", fillColor: "#f3f4f6", fillOpacity: 0.1, weight: 1, opacity: 0.3 };
+  };
+
   return (
     <GeoJSON
-      key={`${JSON.stringify(data)}-${enableChoropleth}`}
+      key={`${JSON.stringify(data)}-${enableChoropleth}-${enableInteractions}`}
       data={data}
-      interactive={true}
-      style={(feature) => {
-        // If choropleth is enabled, use data-driven colors
-        if (enableChoropleth && feature?.properties?.featureType !== "purok") {
-          return getChoroplethStyle(feature, barangaySeverities, false);
-        }
-        
-        // When showing only outlines (Heatmap mode), show clear visible lines
-        if (showOnlyOutlines) {
-          if (feature?.properties?.featureType === "purok") {
-            return {
-              color: "#000000",      // Black border for puroks in heatmap mode
-              fillColor: "transparent",
-              fillOpacity: 0,
-              weight: 2,
-              opacity: 0.7,
-            };
-          }
-          // Barangay borders in heatmap mode
-          return {
-            color: "#1a1a1a",      // Dark border
-            fillColor: "transparent",
-            fillOpacity: 0,
-            weight: 2.5,
-            opacity: 0.6,
-          };
-        }
-        
-        // Different styles for barangays vs puroks (normal mode)
-        if (feature?.properties?.featureType === "purok") {
-          return {
-            color: "#f97316",      // Orange border for puroks
-            fillColor: "#fed7aa",  // Light orange fill
-            fillOpacity: 0.3,
-            weight: 2,
-            opacity: 0.8,
-            // Make puroks appear above barangays
-            pane: 'overlayPane',
-          };
-        }
-        // Barangay style - invisible boundary
-        return {
-          color: "#d1d5db",
-          fillColor: "#f3f4f6",
-          fillOpacity: 0.1,
-          weight: 1,
-          opacity: 0.3,
-          // Barangays stay below puroks
-          pane: 'tilePane',
-        };
-      }}
+      interactive={enableInteractions}
+      style={featureStyle}
+      pointToLayer={(feature, position) => L.circleMarker(position, {
+        ...featureStyle(feature), radius: 7, fillOpacity: 0.85,
+        dashArray: feature.properties?.location_source === "barangay_fallback" ? "3 3" : undefined,
+      })}
       onEachFeature={(feature, layer) => {
         console.log('[BarangayGeoJSON] onEachFeature called for:', feature.properties?.name);
         try {
@@ -1059,7 +906,9 @@ function BarangayGeoJSON({
                 const prevalenceRate = severity.total_children > 0 
                   ? ((severity.malnutrition_count / severity.total_children) * 100).toFixed(1)
                   : '0.0';
-                labelText = `${feature.properties.name}\n${prevalenceRate}% prevalence`;
+                labelText = hasHeatmapData(severity)
+                  ? `${feature.properties.name}\n${prevalenceRate}% prevalence`
+                  : `${feature.properties.name}\nNo eligible measurements`;
               }
             }
             
@@ -1075,7 +924,11 @@ function BarangayGeoJSON({
           // NOTE: Removed popup binding - click now navigates directly to details page
           
           // Create a TOOLTIP for hover (simpler, no flickering)
-          const tooltipContent = `<div style="font-weight: bold; font-size: 13px; padding: 4px 8px;">${props.name}</div>`;
+          const locationSource = feature.properties?.location_source;
+          const locationNote = locationSource === "barangay_fallback" ? "Approximate location · barangay center"
+            : locationSource === "child_centroid" ? "Approximate location · center of mapped measurements"
+            : feature.properties?.geometry_source === "illustrative_extent" ? "Illustrative display area · not a surveyed boundary" : "";
+          const tooltipContent = `<div style="padding:4px 8px;"><strong>${escapeHtml(props.name)}</strong>${locationNote ? `<div style="font-size:10px;margin-top:3px;">${locationNote}</div>` : ""}</div>`;
           layer.bindTooltip(tooltipContent, {
             permanent: false,
             direction: 'right',
@@ -1111,13 +964,7 @@ function BarangayGeoJSON({
                 // Clear hover overlay
                 onHover(null, null);
                 
-                // Restore original style
-                const featureType = (e.target.feature?.properties?.featureType || "barangay");
-                if (featureType === "purok") {
-                  target.setStyle({ color: "#f97316", fillColor: "#fed7aa", fillOpacity: 0.3, weight: 2, opacity: 0.8 });
-                } else {
-                  target.setStyle(barangayStyle);
-                }
+                target.setStyle(featureStyle(feature));
               } catch (err) {
                 console.warn('[BarangayGeoJSON] Error on mouseout:', err);
               }
@@ -1224,6 +1071,9 @@ export function MapView({
     onTileLayerChange?.(tileKey);
   }, [tileKey, onTileLayerChange]);
   const [internalHeatmapOn, setInternalHeatmapOn] = useState(false);
+  const [dotDensity, setDotDensity] = useState(8);
+  const [showHeatmapLabels, setShowHeatmapLabels] = useState(true);
+  const heatmapTiers = COLOR_PALETTES[heatmapColorMode];
   const [internalChoroplethOn, setInternalChoroplethOn] = useState(false);
   const heatmapOn = externalHeatmapOn !== undefined ? externalHeatmapOn : internalHeatmapOn;
   const setHeatmapOn = externalSetHeatmapOn || setInternalHeatmapOn;
@@ -1287,42 +1137,23 @@ export function MapView({
   const { data: barangaysData } = useQuery({
     queryKey: ["barangay-choropleth", user?.id, user?.barangay_id, focusBarangay],
     queryFn: async () => {
-      // FOR ADMIN: Always filter by their assigned barangay
-      // Use focusBarangay if provided, otherwise use user's barangay_id
-      if (user?.role === "admin") {
-        // Get the barangay name to filter by
-        let barangayName = null;
-        
-        if (focusBarangay) {
-          barangayName = decodeURIComponent(focusBarangay);
-        } else if (user?.barangay_id) {
-          // Fetch the barangay name from barangay_id
-          try {
-            const barangayRes = await api.get(`/api/barangays/${user.barangay_id}`);
-            barangayName = barangayRes.data?.name;
-          } catch (err) {
-            console.error('[MapView] Failed to fetch admin barangay name:', err);
-          }
-        }
-        
-        if (barangayName) {
-          const params = `?barangay_name=${encodeURIComponent(barangayName)}`;
-          console.log('[MapView] Admin - Fetching data for barangay:', barangayName);
-          return api.get(`/api/maps/barangay-choropleth${params}`).then((r) => r.data);
-        }
-      }
-      
-      // FOR SUPERADMIN: Always fetch ALL barangays (no filter)
-      console.log('[MapView] Superadmin - Fetching all barangays');
-      return api.get(`/api/maps/barangay-choropleth`).then((r) => r.data);
+      // The backend scopes admins by assignment; superadmins can open the same detail.
+      return api.get("/api/maps/barangay-choropleth", {
+        params: user?.role === "super_admin" && focusBarangay ? { barangay_name: focusBarangay } : {},
+      }).then((response) => response.data);
     },
     enabled: !!user?.id,
   });
 
-  const markers = useMemo(() =>
-    (markersData ?? []).filter((m: any) => isValidCoordinate(m.lat, m.lng)),
-    [markersData]
-  );
+  const markers = useMemo(() => {
+    const focusedId = focusBarangay && user?.role === "super_admin"
+      ? barangaysData?.features?.find((feature: any) => feature.properties?.featureType === "barangay")?.properties?.id
+      : null;
+    return (markersData ?? []).filter((marker: any) =>
+      isValidCoordinate(marker.lat, marker.lng) &&
+      (!focusBarangay || user?.role !== "super_admin" || (focusedId && marker.barangay_id === focusedId))
+    );
+  }, [markersData, barangaysData, focusBarangay, user?.role]);
 
   const filteredBarangaysData = useMemo(() => {
     if (!barangaysData) return null;
@@ -1370,7 +1201,7 @@ export function MapView({
     };
   }, [filteredBarangaysData]);
 
-  // Resolve the selected purok's coordinates from its map feature (marked at the exact recorded location)
+  // Resolve the selected purok center from the same feature used on the map.
   const selectedPurokCoords = useMemo(() => {
     if (!selectedPurokId || !purokFeatures?.features) return null;
     const feat = purokFeatures.features.find((f: any) => f.properties?.id === selectedPurokId);
@@ -1379,7 +1210,7 @@ export function MapView({
     return isValidCoordinate(lat, lng) ? { lat, lng } : null;
   }, [selectedPurokId, purokFeatures]);
 
-  // List used for IDW heatmap
+  // Barangay totals used for the case-count heatmap.
   const barangayList: BarangaySeverity[] = useMemo(() =>
     (filteredBarangaysData?.features
       ?.filter((f: any) => f.properties?.featureType !== "purok")
@@ -1394,7 +1225,7 @@ export function MapView({
     }
     
     // For admin users, center on their assigned barangay (first barangay feature)
-    if (user?.role === "admin") {
+    if (user?.role === "admin" || focusBarangay) {
       // Find the barangay feature (not purok)
       const barangayFeature = filteredBarangaysData.features.find(
         (f: any) => f.properties?.featureType === "barangay" || !f.properties?.featureType
@@ -1412,7 +1243,7 @@ export function MapView({
     
     // For superadmin or fallback, use default center
     return CABADBARAN_CENTER as [number, number];
-  }, [user, filteredBarangaysData]);
+  }, [user, filteredBarangaysData, focusBarangay]);
 
   const mapZoom = focusBarangay || user?.role === "admin" ? 15 : 13;
 
@@ -1454,16 +1285,14 @@ export function MapView({
   return (
     <div ref={containerRef} className={`relative w-full h-full flex flex-col bg-gray-100 ${choroplethOn ? 'choropleth-mode' : ''}`}>
 
-      {/* Layer switcher */}
-      <LayerSwitcher active={tileKey} onChange={setTileKey} />
-
       <div className="flex-1 w-full min-h-0 relative overflow-hidden">
+        <LayerSwitcher active={tileKey} onChange={setTileKey} />
         <MapContainer 
           {...CABADBARAN_MAP_OPTIONS} 
           className={CABADBARAN_MAP_CLASS} 
           style={{ height: "100%", width: "100%", display: "block" }}
         >
-          <MapCenterController center={mapCenter} zoom={mapZoom} />
+          <MapCenterController center={mapCenter} zoom={mapZoom} boundaries={barangayFeatures} />
           
           {/* Show tile layer only if NOT in Heatmap view mode */}
           {tileKey !== "Heatmap" && (
@@ -1485,7 +1314,7 @@ export function MapView({
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               attribution="&copy; OpenStreetMap contributors"
               zIndex={100}
-              opacity={0.15}
+              opacity={0.55}
             />
           )}
 
@@ -1493,6 +1322,7 @@ export function MapView({
           {barangayFeatures && barangayFeatures.features?.length > 0 && (
             <BarangayGeoJSON 
               data={barangayFeatures} 
+              enableInteractions={!(heatmapOn || tileKey === "Heatmap") || choroplethOn}
               user={user}
               onHover={handleHover}
               setSelectedPurokId={setSelectedPurokId}
@@ -1504,14 +1334,14 @@ export function MapView({
           )}
           
           {/* Purok boundaries (render second, on top of barangays) */}
-          {purokFeatures && purokFeatures.features?.length > 0 && (
+          {purokFeatures && purokFeatures.features?.length > 0 && !heatmapOn && tileKey !== "Heatmap" && (
             <BarangayGeoJSON 
               data={purokFeatures} 
               user={user}
               onHover={handleHover}
               setSelectedPurokId={setSelectedPurokId}
               setShowPurokModal={setShowPurokModal}
-              showOnlyOutlines={tileKey === "Heatmap" && !choroplethOn}
+              showOnlyOutlines={false}
               enableChoropleth={false}
               barangaySeverities={[]}
             />
@@ -1527,36 +1357,32 @@ export function MapView({
           <ChildMarkersLayer
             markers={markers}
             showProgramCoverage={showProgramCoverage}
-            heatmapOn={heatmapOn}
+            heatmapOn={heatmapOn || tileKey === "Heatmap"}
           />
 
-          {/* IDW heatmap overlay — show when: toggle is ON AND showHotspots is true AND choropleth is OFF, OR when Heatmap tile layer is selected AND choropleth is OFF */}
-          {((heatmapOn && showHotspots) || tileKey === "Heatmap") && !choroplethOn && barangayList.length > 0 && (
-            <IDWCanvasLayer 
-              data={barangayList} 
-              showLabels={tileKey !== "Heatmap"} 
-              colorMode={heatmapColorMode}
-              opacity={tileKey === "Heatmap" ? 0.95 : 0.82}
-            />
+          {/* Local status dots are controlled independently of hotspot icons. */}
+          {(heatmapOn || tileKey === "Heatmap") && !choroplethOn && barangayList.length > 0 && (
+            <StatusDotLayer data={barangayList} centers={barangaysData.heatmap_centers ?? []} showLabels={showHeatmapLabels} density={dotDensity} />
           )}
 
-          <LayerIconsOverlay
-            showHotspots={showHotspots && !heatmapOn}
+          {!heatmapOn && tileKey !== "Heatmap" && <LayerIconsOverlay
+            showHotspots={showHotspots}
             showProgramCoverage={showProgramCoverage}
             showHomeVisits={showHomeVisits}
             showFacilities={showFacilities}
             showPredictions={showPredictions}
             barangayList={barangayList}
-          />
+          />}
 
         </MapContainer>
       </div>
 
-      {/* ── Heatmap toggle button (inside map panel) — hidden when Heatmap tile is active ── */}
+      <div className="flex shrink-0 flex-wrap items-start gap-2 border-t border-slate-200 bg-white px-3 py-2">
+      {/* Map display controls occupy their own row, outside the map viewport. */}
       {tileKey !== "Heatmap" && (
         <button
           onClick={() => setHeatmapOn(!heatmapOn)}
-          className={`absolute bottom-4 left-4 z-[999] flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold border shadow-lg transition-all ${
+          className={`flex shrink-0 items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
             heatmapOn
               ? "bg-red-600 text-white border-red-500 hover:bg-red-700"
               : "bg-white/95 text-slate-700 border-slate-200 hover:bg-slate-50"
@@ -1579,48 +1405,73 @@ export function MapView({
 
       {/* ── Heatmap legend (shown only when ON or Heatmap layer selected, but NOT when choropleth is ON) ── */}
       {(heatmapOn || tileKey === "Heatmap") && !choroplethOn && (
-        <div className="absolute bottom-16 left-4 z-[999] flex flex-col gap-1.5 rounded-lg border border-slate-200 bg-white/95 px-3 py-2.5 text-xs shadow-md backdrop-blur-sm max-w-[200px]">
-          <p className="font-semibold text-slate-700">Malnutrition Intensity</p>
-          {TIERS.map((tier) => (
-            <span key={tier.label} className="flex items-center gap-2 text-slate-600">
-              <span className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: tier.color }} />
-              {tier.label} <span className="text-slate-400">({tier.range})</span>
+        <details className="group min-w-0 flex-1 text-xs">
+          <summary className="flex min-h-8 cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-1 rounded-md px-2 py-1 text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600 [&::-webkit-details-marker]:hidden">
+            <span className="flex shrink-0 items-center gap-1.5 font-semibold">
+              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3 w-3 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m4 6 4 4 4-4" /></svg>
+              Dot controls
             </span>
-          ))}
-        </div>
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
+              {Object.entries(CASE_DOT_STYLES).map(([status, display]) => (
+                <span key={status} className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: display.color }} />{display.label}
+                </span>
+              ))}
+            </span>
+          </summary>
+          <div className="mt-2 max-h-40 overflow-y-auto border-t border-slate-100 px-2 pt-2">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <label className="flex w-56 max-w-full items-center gap-3 text-[11px] text-slate-700">
+                <span className="shrink-0">Dot density <span className="tabular-nums">{dotDensity}/12</span></span>
+                <input aria-label="Dot density" type="range" min="1" max="12" step="1" value={dotDensity}
+                  onChange={event => setDotDensity(Number(event.target.value))} className="min-w-0 flex-1 accent-teal-600" />
+              </label>
+              <label className="flex items-center gap-2 text-[11px] text-slate-700">
+                <input type="checkbox" checked={showHeatmapLabels} onChange={event => setShowHeatmapLabels(event.target.checked)} className="accent-teal-600" />
+                Area names on zoom
+              </label>
+            </div>
+            <p className="my-2 max-w-2xl text-[10px] leading-relaxed text-slate-500">Display dots preserve measured status proportions; extra dots do not add cases or identify households. Outlines: NAMRIA / PSA (simplified, indicative).</p>
+          </div>
+        </details>
       )}
       
+      </div>
+
       {/* ── Choropleth legend (shown only when choropleth is ON) ── */}
       {choroplethOn && (
         <div className="absolute bottom-16 left-4 z-[999] flex flex-col gap-1.5 rounded-lg border border-slate-200 bg-white/95 px-3 py-2.5 text-xs shadow-md backdrop-blur-sm max-w-[220px]">
           <p className="font-semibold text-slate-700">Malnutrition Prevalence</p>
+          <span className="flex items-center gap-2 text-slate-600">
+            <span className="h-3 w-3 shrink-0 rounded-sm bg-slate-300" />No eligible measurements
+          </span>
           <span className="flex items-center gap-2 text-slate-600">
             <span className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: '#800026' }} />
             Very High <span className="text-slate-400">(&gt;20%)</span>
           </span>
           <span className="flex items-center gap-2 text-slate-600">
             <span className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: '#BD0026' }} />
-            High <span className="text-slate-400">(15-20%)</span>
+            High <span className="text-slate-400">(&gt;15-20%)</span>
           </span>
           <span className="flex items-center gap-2 text-slate-600">
             <span className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: '#E31A1C' }} />
-            Moderate-High <span className="text-slate-400">(10-15%)</span>
+            Moderate-High <span className="text-slate-400">(&gt;10-15%)</span>
           </span>
           <span className="flex items-center gap-2 text-slate-600">
             <span className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: '#FC4E2A' }} />
-            Moderate <span className="text-slate-400">(7-10%)</span>
+            Moderate <span className="text-slate-400">(&gt;7-10%)</span>
           </span>
           <span className="flex items-center gap-2 text-slate-600">
             <span className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: '#FD8D3C' }} />
-            Low-Moderate <span className="text-slate-400">(4-7%)</span>
+            Low-Moderate <span className="text-slate-400">(&gt;4-7%)</span>
           </span>
           <span className="flex items-center gap-2 text-slate-600">
             <span className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: '#FEB24C' }} />
-            Low <span className="text-slate-400">(2-4%)</span>
+            Low <span className="text-slate-400">(&gt;2-4%)</span>
           </span>
           <span className="flex items-center gap-2 text-slate-600">
             <span className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: '#FED976' }} />
-            Very Low <span className="text-slate-400">(0-2%)</span>
+            Very Low <span className="text-slate-400">(&gt;0-2%)</span>
           </span>
           <span className="flex items-center gap-2 text-slate-600">
             <span className="h-3 w-3 rounded-sm shrink-0" style={{ backgroundColor: '#FFEDA0' }} />
@@ -1630,7 +1481,7 @@ export function MapView({
       )}
       
       {/* ── Custom Hover Overlay (Canvas-based, no flicker) ── */}
-      <HoverOverlay hoveredFeature={hoveredFeature} mousePosition={mousePosition} />
+      {!(heatmapOn || tileKey === "Heatmap") && <HoverOverlay hoveredFeature={hoveredFeature} mousePosition={mousePosition} tiers={heatmapTiers} />}
       
       {/* ── Purok Details Modal ── */}
       {showPurokModal && selectedPurokId && (

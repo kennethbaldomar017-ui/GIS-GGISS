@@ -13,12 +13,18 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import HeatmapComponent from './HeatmapComponent';
+import { CASE_DOT_STYLES, type AreaGeometry } from '@/components/map/heatmap-renderer';
 
 interface Hotspot {
   name: string;
   latitude?: number;
   longitude?: number;
   intensity: number;
+  normal_count?: number;
+  moderate_count?: number;
+  severe_count?: number;
+  other_count?: number;
+  scatter_geometry?: AreaGeometry;
   caseCount: number;
   radius?: number;
   description?: string;
@@ -40,44 +46,7 @@ export function GISHotspotAnalysis({ data }: { data?: GISHotspotAnalysisData }) 
     );
   }
 
-  const hotspots = data.hotspots || [
-    {
-      name: 'Zone A - Northern Cluster',
-      latitude: 9.1250,
-      longitude: 125.5600,
-      intensity: 92,
-      caseCount: 125,
-      radius: 2.5,
-      description: 'Highest concentration of nutrition cases',
-    },
-    {
-      name: 'Zone B - Central Area',
-      latitude: 9.1180,
-      longitude: 125.5650,
-      intensity: 67,
-      caseCount: 89,
-      radius: 2.0,
-      description: 'Moderate risk area with growing trend',
-    },
-    {
-      name: 'Zone C - Eastern Sector',
-      latitude: 9.1150,
-      longitude: 125.5800,
-      intensity: 54,
-      caseCount: 72,
-      radius: 1.8,
-      description: 'Scattered cases with improving trend',
-    },
-    {
-      name: 'Zone D - Southern Region',
-      latitude: 9.1080,
-      longitude: 125.5700,
-      intensity: 43,
-      caseCount: 58,
-      radius: 1.5,
-      description: 'Lower intensity area',
-    },
-  ];
+  const hotspots = data.hotspots ?? [];
 
   const intensityData = data.intensityByArea || hotspots.map((h) => ({
     name: h.name.split(' - ')[1] || h.name,
@@ -91,7 +60,7 @@ export function GISHotspotAnalysis({ data }: { data?: GISHotspotAnalysisData }) 
 
   const mapNote =
     data.mapNote ||
-    'The heat map visualization displays the intensity of nutrition cases across geographic zones. Red indicates highest concentration, orange moderate, and yellow lower density areas.';
+    'Display dots fill supplied indicative boundary shapes and preserve the measured status proportions. Green is normal, amber is moderate, red is severe, and gray is another measured status. Extra display dots do not add cases or indicate household locations. Areas without status counts or boundary shapes cannot be plotted.';
 
   return (
     <div className="space-y-6">
@@ -214,28 +183,18 @@ export function GISHotspotAnalysis({ data }: { data?: GISHotspotAnalysisData }) 
 
       {/* Map Reference */}
       <div>
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">GIS Heat Map</h3>
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">GIS Area Status Dots</h3>
         <div className="bg-slate-100 border border-slate-300 rounded-lg overflow-hidden">
           <HeatmapComponent hotspots={hotspots} />
           <div className="p-4 bg-white">
             <p className="text-sm text-slate-600 mb-4">{mapNote}</p>
-            <div className="flex justify-center gap-6 text-xs">
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-red-600 rounded" />
-                <span>Very High (80-100)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-orange-500 rounded" />
-                <span>High (60-79)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-yellow-400 rounded" />
-                <span>Moderate (40-59)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-lime-400 rounded" />
-                <span>Low (0-39)</span>
-              </div>
+            <div className="flex flex-wrap justify-center gap-4 text-xs">
+              {Object.entries(CASE_DOT_STYLES).map(([key, display]) => (
+                <div key={key} className="flex items-center gap-2">
+                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: display.color }} />
+                  <span>{display.label}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>

@@ -1,12 +1,18 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
+import { scatterCaseDots, CASE_DOT_STYLES, type AreaGeometry } from '@/components/map/heatmap-renderer';
 
 interface Hotspot {
   name: string;
   latitude?: number;
   longitude?: number;
   intensity: number;
+  normal_count?: number;
+  moderate_count?: number;
+  severe_count?: number;
+  other_count?: number;
+  scatter_geometry?: AreaGeometry;
   caseCount: number;
   radius?: number;
   description?: string;
@@ -20,7 +26,7 @@ export default function HeatmapComponent({ hotspots }: HeatmapComponentProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (!canvasRef.current || hotspots.length === 0) return;
+    if (!canvasRef.current) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -37,7 +43,7 @@ export default function HeatmapComponent({ hotspots }: HeatmapComponentProps) {
     const minLat = 9.0;
     const maxLat = 9.3;
     const minLng = 125.4;
-    const maxLng = 125.7;
+    const maxLng = 125.78;
 
     // Function to convert lat/lng to canvas coordinates
     const getCanvasCoords = (lat: number, lng: number) => {
@@ -46,68 +52,34 @@ export default function HeatmapComponent({ hotspots }: HeatmapComponentProps) {
       return { x, y };
     };
 
-    // Draw heatmap gradient circles for each hotspot
-    hotspots.forEach((hotspot) => {
-      const lat = hotspot.latitude || 9.15;
-      const lng = hotspot.longitude || 125.55;
-      const { x, y } = getCanvasCoords(lat, lng);
-
-      // Draw multiple circles with decreasing intensity for gradient effect
-      const maxRadius = 80;
-      const steps = 5;
-
-      for (let i = steps; i >= 1; i--) {
-        const radius = (maxRadius / steps) * i;
-        const alpha = ((hotspot.intensity / 100) * (1 - i / steps)) * 0.6;
-
-        // Determine color based on intensity
-        let color = 'rgba(34, 197, 94,'; // green
-        if (hotspot.intensity >= 80) {
-          color = 'rgba(220, 38, 38,'; // red
-        } else if (hotspot.intensity >= 60) {
-          color = 'rgba(234, 88, 12,'; // orange
-        } else if (hotspot.intensity >= 40) {
-          color = 'rgba(234, 179, 8,'; // yellow
-        }
-
-        ctx.fillStyle = `${color} ${alpha})`;
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    });
-
     // Draw markers for each hotspot
     hotspots.forEach((hotspot) => {
-      const lat = hotspot.latitude || 9.15;
-      const lng = hotspot.longitude || 125.55;
+      const lat = hotspot.latitude;
+      const lng = hotspot.longitude;
+      if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng) || lat < minLat || lat > maxLat || lng < minLng || lng > maxLng) return;
       const { x, y } = getCanvasCoords(lat, lng);
 
-      // Determine marker color
-      let color = '#22c55e'; // green
-      if (hotspot.intensity >= 80) {
-        color = '#dc2626'; // red
-      } else if (hotspot.intensity >= 60) {
-        color = '#ea580c'; // orange
-      } else if (hotspot.intensity >= 40) {
-        color = '#eab308'; // yellow
+      const centers = hotspots.filter(area => typeof area.latitude === 'number' && typeof area.longitude === 'number')
+        .map(area => ({ name: area.name, lat: area.latitude!, lng: area.longitude! }));
+      const points = scatterCaseDots({ name: hotspot.name, lat, lng,
+        scatter_geometry: hotspot.scatter_geometry, normal_count: hotspot.normal_count, moderate_count: hotspot.moderate_count ?? NaN,
+        severe_count: hotspot.severe_count ?? NaN, other_count: hotspot.other_count ?? 0,
+      }, centers);
+      for (const point of points) {
+        const position = getCanvasCoords(point.lat, point.lng);
+        ctx.fillStyle = CASE_DOT_STYLES[point.status].color;
+        ctx.beginPath();
+        ctx.arc(position.x, position.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (points.length) {
+        ctx.fillStyle = '#334155';
+        ctx.font = '10px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(hotspot.name, x, y + 9);
       }
 
-      // Draw marker circle
-      ctx.fillStyle = color;
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(x, y, 12, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-
-      // Draw intensity number
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 10px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(hotspot.intensity.toString(), x, y);
     });
 
     // Draw border
