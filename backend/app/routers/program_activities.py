@@ -41,11 +41,22 @@ def _program_out(p: NutritionProgram) -> dict:
     }
 
 
+def _program_query_for_user(user: User):
+    stmt = select(NutritionProgram)
+    if user.role.value == "admin":
+        if not user.barangay_id:
+            raise HTTPException(403, "User is not assigned to a barangay")
+        stmt = stmt.join(Purok, NutritionProgram.purok_id == Purok.id).where(
+            Purok.barangay_id == user.barangay_id
+        )
+    return stmt
+
+
 @router.get("")
 async def list_programs(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     try:
         stmt = (
-            select(NutritionProgram)
+            _program_query_for_user(user)
             .options(
                 selectinload(NutritionProgram.purok),
                 selectinload(NutritionProgram.sessions).selectinload(ProgramSession.participants)
@@ -54,6 +65,8 @@ async def list_programs(db: AsyncSession = Depends(get_db), user: User = Depends
         )
         rows = list((await db.scalars(stmt)).all())
         return [_program_out(r) for r in rows]
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error loading programs: {e}")
         import traceback
@@ -65,9 +78,9 @@ class CreateProgramIn(BaseModel):
     name: str
     type: str  # program_type
     funding_source: str = "City Funded Program"
+    purok_id: UUID
     date: str
     time: str
-    location: str
     description: str | None = None
     status: str = "scheduled"
     estimated_participants: int = 10  # For AI budget calculation
@@ -84,12 +97,18 @@ async def create_program(
         if user.role.value not in ["admin", "super_admin"]:
             raise HTTPException(403, "Not authorized")
         
-        # Get user's barangay first purok as default
-        purok_stmt = select(Purok).where(Purok.barangay_id == user.barangay_id).limit(1)
+        purok_stmt = select(Purok).where(
+            Purok.id == body.purok_id,
+            Purok.is_archived.is_(False),
+        )
         purok = await db.scalar(purok_stmt)
-        
+
         if not purok:
-            raise HTTPException(404, "No purok found for your barangay")
+            raise HTTPException(404, "Selected purok not found or is archived")
+        if user.role.value == "admin" and (
+            not user.barangay_id or purok.barangay_id != user.barangay_id
+        ):
+            raise HTTPException(403, "You can only create programs in your assigned barangay")
         
         # Generate AI budget recommendation with fallback
         try:
@@ -128,9 +147,18 @@ async def create_program(
         
         db.add(program)
         await db.commit()
-        await db.refresh(program)
-        
-        result = _program_out(program)
+
+        created_program_result = await db.execute(
+            select(NutritionProgram)
+            .where(NutritionProgram.id == program.id)
+            .options(
+                selectinload(NutritionProgram.purok),
+                selectinload(NutritionProgram.sessions).selectinload(ProgramSession.participants),
+            )
+        )
+        created_program = created_program_result.scalar_one()
+
+        result = _program_out(created_program)
         result["ai_budget"] = ai_recommendation
         return result
     
@@ -152,7 +180,7 @@ async def get_program_details(
 ):
     """Get detailed program information including budget and registrations"""
     stmt = (
-        select(NutritionProgram)
+        _program_query_for_user(user)
         .where(NutritionProgram.id == program_id)
         .options(
             selectinload(NutritionProgram.purok),
@@ -202,8 +230,16 @@ def _child_out(c: Child, attended: bool = False, check_in_time: str | None = Non
 
 @router.get("/{program_id}/children")
 async def program_children(program_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    program = await db.scalar(
+        _program_query_for_user(user).where(NutritionProgram.id == program_id)
+    )
+    if not program:
+        raise HTTPException(404, "Program not found")
+
     sessions = list((await db.scalars(
-        select(ProgramSession).where(ProgramSession.program_id == program_id)
+        select(ProgramSession)
+        .where(ProgramSession.program_id == program_id)
+        .options(selectinload(ProgramSession.participants))
     )).all())
     child_ids = set()
     attended_map = {}
@@ -224,6 +260,12 @@ class CheckInIn(BaseModel):
 
 @router.post("/{program_id}/check-in")
 async def check_in(program_id: UUID, body: CheckInIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    program = await db.scalar(
+        _program_query_for_user(user).where(NutritionProgram.id == program_id)
+    )
+    if not program:
+        raise HTTPException(404, "Program not found")
+
     session = await db.scalar(
         select(ProgramSession).where(ProgramSession.program_id == program_id).order_by(ProgramSession.session_date.desc())
     )
@@ -269,7 +311,7 @@ async def register_participant(
     
     # Get the program and its purok
     program = await db.scalar(
-        select(NutritionProgram).where(NutritionProgram.id == program_id)
+        _program_query_for_user(user).where(NutritionProgram.id == program_id)
     )
     if not program:
         from fastapi import HTTPException
@@ -538,7 +580,7 @@ async def approve_program(
 ):
     """Approve a program (SuperAdmin only)"""
     program = await db.scalar(
-        select(NutritionProgram).where(NutritionProgram.id == program_id)
+        _program_query_for_user(user).where(NutritionProgram.id == program_id)
     )
     
     if not program:
@@ -651,7 +693,7 @@ async def delete_program(
         raise HTTPException(403, "Not authorized to delete programs")
     
     program = await db.scalar(
-        select(NutritionProgram).where(NutritionProgram.id == program_id)
+        _program_query_for_user(user).where(NutritionProgram.id == program_id)
     )
     
     if not program:
@@ -702,7 +744,7 @@ async def generate_program_report(
     try:
         # Get the program with related data
         stmt = (
-            select(NutritionProgram)
+            _program_query_for_user(user)
             .where(NutritionProgram.id == program_id)
             .options(
                 selectinload(NutritionProgram.purok),
@@ -717,8 +759,10 @@ async def generate_program_report(
         
         print(f"Program found: {program.name}")
         
-        # Get barangay info for formal header
-        barangay = await db.get(Barangay, user.barangay_id) if user.barangay_id else None
+        # Attribute reports to the barangay where the program is scheduled.
+        program_barangay_id = program.purok.barangay_id if program.purok else None
+        barangay = await db.get(Barangay, program_barangay_id) if program_barangay_id else None
+        budget_amount = float(program.budget_amount or 0)
         
         # Calculate statistics
         total_sessions = len(program.sessions) if program.sessions else 0
@@ -760,7 +804,7 @@ async def generate_program_report(
             "program_type": program.program_type if hasattr(program, 'program_type') else "General Nutrition Program",
             "program_description": program.description if hasattr(program, 'description') else f"Implementation of {program.name} program",
             "funding_source": program.funding_source if hasattr(program, 'funding_source') else "Municipal Fund",
-            "budget_allocated": float(program.budget_amount) if program.budget_amount else 0.0,
+            "budget_allocated": budget_amount,
             "location": program.purok.name if program.purok else "Various Locations",
             "implementation_period": "Monthly",
             
@@ -800,7 +844,7 @@ async def generate_program_report(
                 f"Successfully conducted {total_sessions} program sessions",
                 f"Reached {total_participants} total participants",
                 f"Achieved {attendance_rate} average attendance rate",
-                f"Total budget utilization: ₱{float(program.budget_amount) if program.budget_amount else 0:,.2f}",
+                f"Total budget utilization: ₱{budget_amount:,.2f}",
                 "Provided nutrition education and health monitoring services",
             ],
             
@@ -821,7 +865,7 @@ async def generate_program_report(
             
             # Compliance & Quality
             "compliance": {
-                "budget_utilization": f"{((float(program.budget_amount) or 0) / max(float(program.budget_amount) or 1, 1)) * 100:.1f}%",
+                "budget_utilization": f"{(budget_amount / max(budget_amount, 1)) * 100:.1f}%",
                 "activity_completion": "100%",
                 "documentation_status": "Complete",
                 "quality_assurance": "Satisfactory",
@@ -840,7 +884,7 @@ async def generate_program_report(
         report = Report(
             title=report_title,
             report_type=ReportType.program_activities,
-            barangay_id=user.barangay_id,
+            barangay_id=program_barangay_id,
             generated_by=user.id,
             period_start=datetime.now(timezone.utc).date(),
             period_end=datetime.now(timezone.utc).date(),
@@ -880,5 +924,3 @@ async def generate_program_report(
         print(f"=== FORMAL REPORT GENERATION FAILED ===\n")
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to generate report: {str(e)}")
-
-

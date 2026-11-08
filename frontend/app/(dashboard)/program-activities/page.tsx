@@ -58,6 +58,13 @@ interface Child {
   check_in_time?: string;
 }
 
+interface PurokOption {
+  id: string;
+  name: string;
+  barangay_id: string;
+  barangay_name: string;
+}
+
 export default function ProgramActivitiesPage() {
   const { user } = useAuthStore();
   const { addToast } = useToast();
@@ -86,9 +93,9 @@ export default function ProgramActivitiesPage() {
     type: "",
     funding_source: "",
     estimated_participants: 20,
+    purok_id: "",
     date: "",
     time: "",
-    location: "",
     description: ""
   });
   
@@ -103,6 +110,17 @@ export default function ProgramActivitiesPage() {
       return res.data;
     }
   });
+
+  const { data: puroks, isLoading: puroksLoading, error: puroksError } = useQuery<PurokOption[]>({
+    queryKey: ["program-location-puroks"],
+    queryFn: async () => {
+      const res = await api.get("/api/puroks");
+      return res.data;
+    }
+  });
+  const availablePuroks = (puroks ?? []).filter((purok) =>
+    user?.role !== "admin" || purok.barangay_id === user.barangay_id
+  );
 
   // Form state for registering participant
   const [participantForm, setParticipantForm] = useState({
@@ -419,9 +437,9 @@ export default function ProgramActivitiesPage() {
         type: programForm.type,
         funding_source: programForm.funding_source,
         estimated_participants: programForm.estimated_participants,
+        purok_id: programForm.purok_id,
         date: programForm.date,
         time: programForm.time,
-        location: programForm.location,
         description: programForm.description,
         status: "scheduled"
       });
@@ -440,9 +458,9 @@ export default function ProgramActivitiesPage() {
         type: "",
         funding_source: "",
         estimated_participants: 20,
+        purok_id: "",
         date: "",
         time: "",
-        location: "",
         description: ""
       });
       queryClient.invalidateQueries({ queryKey: ["programs"] });
@@ -1825,16 +1843,33 @@ export default function ProgramActivitiesPage() {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Location *
+                  Location (Purok) *
                 </label>
-                <input
-                  type="text"
-                  value={programForm.location}
-                  onChange={(e) => setProgramForm({...programForm, location: e.target.value})}
-                  placeholder="e.g., Barangay Hall, Poblacion"
+                <select
+                  value={programForm.purok_id}
+                  onChange={(e) => setProgramForm({...programForm, purok_id: e.target.value})}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
-                />
+                  disabled={puroksLoading || !!puroksError || availablePuroks.length === 0}
+                >
+                  <option value="">
+                    {puroksLoading ? "Loading locations..." : "Select a purok..."}
+                  </option>
+                  {availablePuroks.map((purok) => (
+                    <option key={purok.id} value={purok.id}>
+                      {purok.barangay_name} — {purok.name}
+                    </option>
+                  ))}
+                </select>
+                {puroksError ? (
+                  <p className="text-xs text-red-600 mt-1">Could not load locations. Please try again.</p>
+                ) : !puroksLoading && availablePuroks.length === 0 ? (
+                  <p className="text-xs text-amber-700 mt-1">
+                    {user?.role === "admin"
+                      ? "No active puroks are available in your assigned barangay."
+                      : "No active puroks are available."}
+                  </p>
+                ) : null}
               </div>
 
               <div>

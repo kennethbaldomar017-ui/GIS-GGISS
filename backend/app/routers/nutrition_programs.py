@@ -40,10 +40,17 @@ async def get_program_enums():
 
 @router.get("", response_model=list[NutritionProgramOut])
 async def list_nutrition_programs_root(
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """List nutrition programs - root endpoint with no auth requirement for backward compatibility"""
+    """List nutrition programs visible to the authenticated user"""
     query = select(NutritionProgram)
+    if current_user.role == "admin":
+        if not current_user.barangay_id:
+            raise HTTPException(status_code=403, detail="User is not assigned to a barangay")
+        query = query.join(Purok, NutritionProgram.purok_id == Purok.id).where(
+            Purok.barangay_id == current_user.barangay_id
+        )
     result = await db.execute(query)
     programs = result.scalars().all()
     return programs
@@ -627,4 +634,3 @@ async def revision_nutrition_program(
     await db.commit()
     await db.refresh(program)
     return program
-
